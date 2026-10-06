@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ECE RPG - Portfolio Command Center</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+</head>
+<body class="pixel-theme">
+    <div class="crt-overlay"></div>
+
+    <!-- Header & Retro Game HUD -->
+    <header class="game-hud">
+        <div class="hud-top">
+            <div class="brand">
+                <span class="pixel-icon">⚡</span>
+                <span class="game-title">ECE_PORTFOLIO_OS // 2026</span>
+            </div>
+            <div id="freeze-flag" class="freeze-pill normal">
+                <span class="blink-dot"></span>
+                <span id="freeze-pill-text">PROTOCOL: STANDBY</span>
+            </div>
+        </div>
+
+        <!-- Pokémon-Style Trainer & Companion Stat Bar -->
+        <div class="trainer-card">
+            <!-- Menacing Cute Pixel Companion Avatar -->
+            <div class="avatar-frame">
+                <svg class="pixel-avatar" viewBox="0 0 16 16" shape-rendering="crispEdges">
+                    <!-- Horns / Ears -->
+                    <rect x="2" y="1" width="2" height="2" fill="#7c3aed"/>
+                    <rect x="12" y="1" width="2" height="2" fill="#7c3aed"/>
+                    <rect x="3" y="3" width="2" height="2" fill="#9333ea"/>
+                    <rect x="11" y="3" width="2" height="2" fill="#9333ea"/>
+                    <!-- Head & Body -->
+                    <rect x="4" y="3" width="8" height="10" fill="#6b21a8"/>
+                    <rect x="2" y="5" width="12" height="7" fill="#6b21a8"/>
+                    <!-- Menacing Glowing Eyes -->
+                    <rect x="4" y="6" width="3" height="2" fill="#ef4444"/>
+                    <rect x="9" y="6" width="3" height="2" fill="#ef4444"/>
+                    <rect x="5" y="6" width="1" height="1" fill="#fee2e2"/>
+                    <rect x="10" y="6" width="1" height="1" fill="#fee2e2"/>
+                    <!-- Menacing Jagged Grin -->
+                    <rect x="5" y="10" width="6" height="1" fill="#f8fafc"/>
+                    <rect x="6" y="11" width="1" height="1" fill="#f8fafc"/>
+                    <rect x="9" y="11" width="1" height="1" fill="#f8fafc"/>
+                    <!-- Feet -->
+                    <rect x="3" y="13" width="3" height="2" fill="#581c87"/>
+                    <rect x="10" y="13" width="3" height="2" fill="#581c87"/>
+                </svg>
+                <div class="avatar-label">SHADOW_BOT</div>
+            </div>
+
+            <!-- Health & XP Bars -->
+            <div class="player-meters">
+                <div class="meter-title-row">
+                    <span id="player-title" class="player-title">GANSHYAM [SILICON INITIATE]</span>
+                    <span id="level-badge" class="level-badge">LVL 03 (SEM 3)</span>
+                </div>
+
+                <div class="bar-container">
+                    <div class="bar-label">HP <span id="hp-text">100/100</span></div>
+                    <div class="meter-track">
+                        <div id="hp-fill" class="meter-fill hp-green" style="width: 100%;"></div>
+                    </div>
+                </div>
+
+                <div class="bar-container">
+                    <div class="bar-label">EXP <span id="xp-text">120/1500</span></div>
+                    <div class="meter-track">
+                        <div id="xp-fill" class="meter-fill xp-blue" style="width: 8%;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Game Board -->
+    <main class="board-grid">
+        <!-- Quest Board for Current Semester -->
+        <section class="pixel-box quest-board">
+            <div class="box-title">
+                <span>ACTIVE SEMESTER QUEST LOG</span>
+                <span id="quest-count" class="badge">5 QUESTS</span>
+            </div>
+            <div id="quests-container" class="quest-list">
+                <!-- Injected dynamically by app.js -->
+            </div>
+        </section>
+
+        <!-- Right Side: Academic Defense & Pod Sync -->
+        <aside class="side-column">
+            <div class="pixel-box freeze-box">
+                <div class="box-title">ACADEMIC FREEZE SHIELD</div>
+                <div class="freeze-content">
+                    <p class="freeze-notice">MANDATE: CGPA &gt; 9.0</p>
+                    <div class="countdown-display">
+                        <span class="days-num" id="countdown-days">--</span>
+                        <span class="days-label">DAYS TO CIE-2</span>
+                    </div>
+                    <div class="almanac-scroll">
+                        <div class="scroll-item">⚔️ CIE-2: Nov 23 - Nov 28</div>
+                        <div class="scroll-item">🛡️ Lab SEE: Nov 30 - Dec 09</div>
+                        <div class="scroll-item">🏆 Theory SEE: Dec 10 - Jan 02</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pixel-box pod-box">
+                <div class="box-title">POD ROTATION MATRIX</div>
+                <div class="pod-info">
+                    <div class="pod-badge pod-a">POD A: Firmware &amp; RTL</div>
+                    <div class="pod-badge pod-b">POD B: Systems &amp; Vision</div>
+                    <div class="pod-badge pod-c">POD C: Verification &amp; UI</div>
+                    <p class="role-caption">YOU: Lead Architect &amp; Integrator</p>
+                </div>
+            </div>
+        </aside>
+
+
+    <!-- Modal for Quest Verification & Git Submission -->
+    <div id="quest-modal" class="modal-backdrop hidden">
+        <div class="pixel-box modal-box">
+            <div class="box-title">VERIFY &amp; SUBMIT QUEST</div>
+            <div class="modal-content">
+                <h4 id="modal-quest-title">Quest Title</h4>
+                <p class="modal-instruction">Submit your Git Repository URL. It must contain the designated quest identifier: <code id="modal-expected-slug">slug</code></p>
+                
+                <input type="url" id="repo-url-input" class="pixel-input" placeholder="https://github.com/your-username/repo-name" />
+                
+                <div id="modal-error" class="modal-error hidden"></div>
+
+                <div class="modal-actions">
+                    <button class="pixel-btn cancel-btn" onclick="closeModal()">CANCEL</button>
+                    <button class="pixel-btn submit-btn" onclick="confirmQuestSubmission()">CLAIM REWARD</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+
+    <!-- Retro Level-Up Fanfare Overlay -->
+    <div id="levelup-modal" class="modal-backdrop hidden">
+        <div class="pixel-box levelup-box">
+            <div class="levelup-header">★ LEVEL UP! SEMESTER CLEARED ★</div>
+            <div class="levelup-body">
+                <div class="confetti-container">
+                    <span class="pixel-star">✨</span>
+                    <span class="pixel-star">⭐</span>
+                    <span class="pixel-star">✨</span>
+                </div>
+                <svg class="pixel-avatar victory-bounce" viewBox="0 0 16 16" shape-rendering="crispEdges">
+                    <rect x="2" y="1" width="2" height="2" fill="#22c55e"/>
+                    <rect x="12" y="1" width="2" height="2" fill="#22c55e"/>
+                    <rect x="3" y="3" width="2" height="2" fill="#4ade80"/>
+                    <rect x="11" y="3" width="2" height="2" fill="#4ade80"/>
+                    <rect x="4" y="3" width="8" height="10" fill="#16a34a"/>
+                    <rect x="2" y="5" width="12" height="7" fill="#16a34a"/>
+                    <!-- Victorious Golden Star Eyes -->
+                    <rect x="5" y="6" width="2" height="2" fill="#facc15"/>
+                    <rect x="10" y="6" width="2" height="2" fill="#facc15"/>
+                    <!-- Wide Victorious Smile -->
+                    <rect x="4" y="10" width="8" height="1" fill="#ffffff"/>
+                    <rect x="5" y="11" width="6" height="1" fill="#ffffff"/>
+                </svg>
+                <h3 id="levelup-title">PROMOTED TO LEVEL 04!</h3>
+                <p id="levelup-subtitle" class="levelup-text">+1000 SEMESTER CLEAR BONUS XP GRANTED!</p>
+                <button class="pixel-btn victory-btn" onclick="closeLevelUpModal()">CONTINUE JOURNEY</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Retro Defeat / Sad Rejection Modal -->
+    <div id="defeat-modal" class="modal-backdrop hidden">
+        <div class="pixel-box defeat-box">
+            <div class="defeat-header">⚠ QUEST VERIFICATION FAILED ⚠</div>
+            <div class="defeat-body">
+                <svg class="pixel-avatar defeat-shake" viewBox="0 0 16 16" shape-rendering="crispEdges">
+                    <rect x="2" y="2" width="2" height="2" fill="#64748b"/>
+                    <rect x="12" y="2" width="2" height="2" fill="#64748b"/>
+                    <rect x="4" y="3" width="8" height="10" fill="#475569"/>
+                    <rect x="2" y="5" width="12" height="7" fill="#475569"/>
+                    <!-- Sad Crying Eyes -->
+                    <rect x="4" y="7" width="2" height="1" fill="#38bdf8"/>
+                    <rect x="10" y="7" width="2" height="1" fill="#38bdf8"/>
+                    <rect x="4" y="8" width="1" height="2" fill="#38bdf8"/>
+                    <rect x="11" y="8" width="1" height="2" fill="#38bdf8"/>
+                    <!-- Down-turned Mouth -->
+                    <rect x="5" y="11" width="6" height="1" fill="#000000"/>
+                    <rect x="4" y="12" width="2" height="1" fill="#000000"/>
+                    <rect x="10" y="12" width="2" height="1" fill="#000000"/>
+                </svg>
+                <h3 id="defeat-title">MISSION REJECTED</h3>
+                <p id="defeat-desc" class="defeat-desc">Repository mismatch or invalid slug.</p>
+                <div id="defeat-penalty-box" class="penalty-box hidden">
+                    <span class="penalty-text">💔 DAMAGE TAKEN: -25 HP</span>
+                </div>
+                <button class="pixel-btn defeat-btn" onclick="closeDefeatModal()">TRY AGAIN</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
