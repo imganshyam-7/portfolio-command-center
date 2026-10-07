@@ -50,7 +50,7 @@ function captureFrame(videoElementId) {
 }
 
 // ==========================================
-// API Helper
+// Safe API Fetch Helper (Prevents "Unexpected token 'I'")
 // ==========================================
 async function apiFetch(endpoint, options = {}) {
   const token = localStorage.getItem('auth_token') || '';
@@ -66,6 +66,20 @@ async function apiFetch(endpoint, options = {}) {
     document.getElementById('auth-modal').style.display = 'flex';
   }
   return res;
+}
+
+async function parseJsonResponse(res) {
+  const rawText = await res.text();
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (err) {
+    throw new Error(`Server returned status ${res.status}: ${rawText || 'Internal Server Error'}`);
+  }
+  if (!res.ok) {
+    throw new Error(parsed.detail || parsed.message || 'Operation failed');
+  }
+  return parsed;
 }
 
 function escapeHtml(str) {
@@ -193,8 +207,7 @@ async function submitLogin() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password })
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Authentication failed');
+    const data = await parseJsonResponse(res);
 
     localStorage.setItem('auth_token', data.user.username);
     document.getElementById('auth-modal').style.display = 'none';
@@ -228,8 +241,7 @@ async function submitRegister() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password, biometric_image: faceImage })
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Registration failed');
+    const data = await parseJsonResponse(res);
 
     stopCamera('reg-camera');
     document.getElementById('auth-modal').style.display = 'none';
@@ -414,8 +426,7 @@ async function submitQuestForm() {
         biometric_snapshot: snapshot
       })
     });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.detail || 'Submission rejected');
+    const result = await parseJsonResponse(res);
 
     alert(result.message);
     closeSubmitModal();
@@ -505,8 +516,7 @@ async function executeCalibration() {
       method: 'POST',
       body: JSON.stringify({ biometric_image: faceImage })
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Calibration failed');
+    const data = await parseJsonResponse(res);
 
     alert(data.message);
     document.getElementById('bio-warning-banner').style.display = 'none';
@@ -520,7 +530,7 @@ async function executeCalibration() {
 }
 
 // ==========================================
-// Alerts & Comms
+// Alerts & Encrypted Comms
 // ==========================================
 async function checkDeadlines() {
   try {

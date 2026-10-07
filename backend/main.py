@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from backend.biometrics import extract_face_embedding, verify_faces
 
 # ==============================================================================
-# Database Configuration
+# Database Configuration & Self-Healing Auto-Migrations
 # ==============================================================================
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "data", "command_center.db")
@@ -44,6 +44,7 @@ def init_database():
     conn = get_db()
     c = conn.cursor()
 
+    # 1. Base Users Table
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,7 +58,24 @@ def init_database():
         );
     """)
 
-    # Seed creator account if not existing
+    # Self-healing column patch for users table
+    c.execute("PRAGMA table_info(users);")
+    user_cols = [r[1] for r in c.fetchall()]
+    user_patches = [
+        ("biometric_encoding", "TEXT"),
+        ("current_xp", "INTEGER DEFAULT 0"),
+        ("current_semester", "INTEGER DEFAULT 3"),
+        ("role", "TEXT DEFAULT 'member'")
+    ]
+    for col, definition in user_patches:
+        if col not in user_cols:
+            try:
+                c.execute(f"ALTER TABLE users ADD COLUMN {col} {definition};")
+                print(f"[DB MIGRATION] Added column '{col}' to table 'users'.")
+            except Exception as e:
+                print(f"[DB WARNING] Failed patching '{col}': {e}")
+
+    # Seed Creator Account if Missing
     c.execute("SELECT id FROM users WHERE LOWER(username) = 'ganshyam';")
     if not c.fetchone():
         c.execute("""
@@ -65,6 +83,42 @@ def init_database():
             VALUES ('ganshyam', ?, 'creator', 0, 3);
         """, (hash_password("ganshyam123"),))
 
+    # 2. Quest Progress Table & Migrations
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS user_quest_progress (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            quest_id INTEGER NOT NULL,
+            repo_url TEXT,
+            notes TEXT DEFAULT 'AUTOMATICALLY_VERIFIED',
+            status TEXT DEFAULT 'PENDING',
+            submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, quest_id)
+        );
+    """)
+
+    c.execute("PRAGMA table_info(user_quest_progress);")
+    q_cols = [r[1] for r in c.fetchall()]
+    for col in ["repo_url", "notes", "status", "submitted_at"]:
+        if col not in q_cols:
+            try:
+                c.execute(f"ALTER TABLE user_quest_progress ADD COLUMN {col} TEXT;")
+                print(f"[DB MIGRATION] Added column '{col}' to table 'user_quest_progress'.")
+            except Exception as e:
+                print(f"[DB WARNING] Failed patching '{col}': {e}")
+
+    # 3. Private Messaging
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS private_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender_id INTEGER NOT NULL,
+            receiver_id INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+
+    # 4. Roadmap Milestones Catalog
     c.execute("""
         CREATE TABLE IF NOT EXISTS roadmap_milestones (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,30 +138,6 @@ def init_database():
         );
     """)
 
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS user_quest_progress (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            quest_id INTEGER NOT NULL,
-            repo_url TEXT,
-            notes TEXT DEFAULT 'AUTOMATICALLY_VERIFIED',
-            status TEXT DEFAULT 'PENDING',
-            submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(user_id, quest_id)
-        );
-    """)
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS private_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sender_id INTEGER NOT NULL,
-            receiver_id INTEGER NOT NULL,
-            content TEXT NOT NULL,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-    """)
-
-    # Auto-seed curriculum if empty
     c.execute("SELECT COUNT(*) FROM roadmap_milestones;")
     if c.fetchone()[0] == 0:
         curriculum = [
@@ -176,7 +206,7 @@ init_database()
 # ==============================================================================
 # FastAPI Application
 # ==============================================================================
-app = FastAPI(title="ECE Portfolio Command Center", version="3.0")
+app = FastAPI(title="ECE Portfolio Command Center", version="3.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -216,7 +246,7 @@ class MessageSendRequest(BaseModel):
 # ==============================================================================
 def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Authentication required.")
+        raise HTTPException(status_code=401, detail="Authentication credentials required.")
     username = authorization.split("Bearer ", 1)[1].strip()
     conn = get_db()
     c = conn.cursor()
@@ -224,7 +254,7 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
         c.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(?);", (username,))
         row = c.fetchone()
         if not row:
-            raise HTTPException(status_code=401, detail="Invalid session credentials.")
+            raise HTTPException(status_code=401, detail="Session expired or invalid user.")
         return dict(row)
     finally:
         conn.close()
@@ -243,7 +273,7 @@ def get_optional_user(authorization: Optional[str] = Header(None)) -> Optional[d
         conn.close()
 
 # ==============================================================================
-# Auth Routes
+# Auth & Biometrics Routes
 # ==============================================================================
 @app.post("/api/auth/login")
 def auth_login(payload: LoginRequest):
@@ -254,11 +284,11 @@ def auth_login(payload: LoginRequest):
         c.execute("SELECT * FROM users WHERE LOWER(username) = ?;", (username,))
         user = c.fetchone()
         if not user:
-            raise HTTPException(status_code=401, detail="Invalid callsign or credentials.")
+            raise HTTPException(status_code=401, detail="Invalid callsign or passphrase.")
 
         user_dict = dict(user)
         if not verify_password(user_dict.get("password_hash"), payload.password):
-            raise HTTPException(status_code=401, detail="Invalid callsign or credentials.")
+            raise HTTPException(status_code=401, detail="Invalid callsign or passphrase.")
 
         user_dict.pop("password_hash", None)
         user_dict["has_biometrics"] = bool(user_dict.get("biometric_encoding"))
@@ -292,7 +322,7 @@ def auth_register(payload: RegisterRequest):
             raise HTTPException(status_code=400, detail="Callsign already taken.")
 
         pw_hash = hash_password(password)
-        # Grants 50 XP starting welcome bonus to all new members
+        # Grants 50 XP starting welcome bonus to all registered cadets
         c.execute("""
             INSERT INTO users (username, password_hash, biometric_encoding, role, current_xp, current_semester)
             VALUES (?, ?, ?, 'member', 50, ?);
@@ -306,7 +336,7 @@ def auth_register(payload: RegisterRequest):
 
 @app.post("/api/bio/calibrate")
 def calibrate_biometrics(payload: CalibrateRequest, user: dict = Depends(get_current_user)):
-    """Enrolls/recalibrates biometric face embedding (Creator-only privilege)."""
+    """Enrolls or recalibrates biometric face embedding (Creator-only privilege)."""
     if user["role"] != "creator":
         raise HTTPException(status_code=403, detail="Access Denied: Only Creator can recalibrate biometrics.")
 
@@ -326,7 +356,7 @@ def calibrate_biometrics(payload: CalibrateRequest, user: dict = Depends(get_cur
         conn.close()
 
 # ==============================================================================
-# Quest Logistics & Submissions
+# Quests & Anti-Proxy Submission
 # ==============================================================================
 @app.get("/api/quests")
 def get_quests(semester: Optional[int] = None, user: Optional[dict] = Depends(get_optional_user)):
@@ -433,7 +463,7 @@ def submit_quest(payload: QuestSubmitRequest, user: dict = Depends(get_current_u
     if not is_match:
         raise HTTPException(
             status_code=403, 
-            detail="⛔ BIOMETRIC REJECTED: Verification failed. The live operator does not match the registered user for this account!"
+            detail="⛔ BIOMETRIC REJECTED: Verification failed. The live operator does not match the registered face for this account!"
         )
 
     conn = get_db()
@@ -564,9 +594,9 @@ def send_message(payload: MessageSendRequest, user: dict = Depends(get_current_u
     finally:
         conn.close()
 
-# ==============================================================================
-# Static File Hosting
-# ==============================================================================
+# ==============================================
+# Static File Mounts
+# ==============================================
 if os.path.exists(FRONTEND_DIR):
     app.mount("/frontend", StaticFiles(directory=FRONTEND_DIR), name="frontend_dir")
     app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend_root")
