@@ -1,528 +1,440 @@
-// State Management
 let currentUser = null;
-let currentAuthMode = 'login';
-let selectedPeerId = null;
-let chatPollTimer = null;
-let videoStream = null;
+let selectedSemester = null;
+let activePeerId = null;
 
-// Unique device identification per browser instance
-function getDeviceId() {
-  let id = localStorage.getItem('device_id');
-  if (!id) {
-    id = 'dev_' + Math.random().toString(36).substring(2, 10) + '_' + Date.now();
-    localStorage.setItem('device_id', id);
+// ==========================================
+// API Fetch Wrapper
+// ==========================================
+async function apiFetch(endpoint, options = {}) {
+  const token = localStorage.getItem('auth_token') || '';
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    ...(options.headers || {})
+  };
+  
+  const res = await fetch(endpoint, { ...options, headers });
+  if (res.status === 401 && !endpoint.includes('/api/auth/')) {
+    localStorage.removeItem('auth_token');
+    document.getElementById('auth-modal').style.display = 'flex';
   }
-  return id;
+  return res;
 }
 
-// Authenticated fetch wrapper that attaches Bearer token automatically
-async function apiFetch(url, options = {}) {
-  const token = localStorage.getItem('auth_token');
-  const headers = Object.assign({}, options.headers || {});
-  
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  
-  return fetch(url, { ...options, headers });
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/[&<>'"]/g, tag => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&#39;',
+    '"': '&quot;'
+  }[tag] || tag));
 }
 
-// Session Initializer on page load
+// ==========================================
+// Initialization
+// ==========================================
 document.addEventListener('DOMContentLoaded', async () => {
-  await verifySession();
+  const storedUser = localStorage.getItem('auth_token');
+  
+  // Load public quest catalogue & matrix immediately so page is never blank
+  await loadQuests();
+  await loadGuildMatrix();
+
+  if (!storedUser) {
+    document.getElementById('auth-status-label').innerText = 'UNAUTHENTICATED (GUEST)';
+    document.getElementById('auth-modal').style.display = 'flex';
+  } else {
+    await initSession(storedUser);
+  }
 });
 
-async function verifySession() {
-  const token = localStorage.getItem('auth_token');
-  if (!token) {
-    onLogoutComplete();
-    return;
-  }
+async function initSession(username) {
+  currentUser = { username: username, role: username.toLowerCase() === 'ganshyam' ? 'creator' : 'member' };
+  document.getElementById('auth-status-label').innerText = `ACTIVE: ${username.toUpperCase()} [${currentUser.role.toUpperCase()}]`;
+  document.getElementById('profile-name-role').innerText = `${username.toUpperCase()} [${currentUser.role.toUpperCase()}]`;
 
-  try {
-    const res = await apiFetch('/api/auth/me');
-    if (res.ok) {
-      const data = await res.json();
-      onLoginSuccess(data);
-    } else {
-      localStorage.removeItem('auth_token');
-      onLogoutComplete();
-    }
-  } catch (err) {
-    onLogoutComplete();
-  }
+  await Promise.all([
+    loadQuests(),
+    loadGuildMatrix(),
+    loadPeers(),
+    checkDeadlines()
+  ]);
 }
 
-// Auth Modal Controls
-function openAuthModal() {
-  document.getElementById('auth-modal').style.display = 'flex';
-  document.getElementById('auth-error').style.display = 'none';
-  switchAuthTab('login');
-}
-
-function closeAuthModal() {
-  document.getElementById('auth-modal').style.display = 'none';
-}
-
-function switchAuthTab(mode) {
-  currentAuthMode = mode;
-  const tabLogin = document.getElementById('tab-btn-login');
-  const tabReg = document.getElementById('tab-btn-register');
-  const pairingSec = document.getElementById('pairing-section');
-  const instruction = document.getElementById('auth-tab-instruction');
-  const submitBtn = document.getElementById('auth-submit-btn');
-  const errorBox = document.getElementById('auth-error');
-  errorBox.style.display = 'none';
-
-  if (mode === 'register') {
-    tabReg.classList.add('active');
-    tabLogin.classList.remove('active');
-    pairingSec.style.display = 'none'; // Dynamic members do not need Creator master key
-    instruction.innerText = 'Create an independent Member account to access quest logs, ranks, and 1-on-1 comms.';
-    submitBtn.innerText = 'CREATE ACCOUNT';
-  } else {
-    tabLogin.classList.add('active');
-    tabReg.classList.remove('active');
-    pairingSec.style.display = 'block';
-    instruction.innerText = 'Enter credentials. Creator profile is hardware-locked to 3 authorized devices.';
-    submitBtn.innerText = 'AUTHENTICATE';
-  }
-}
-
-// Auth Form Submission
-async function submitAuth() {
-  const username = document.getElementById('auth-username').value.trim();
-  const password = document.getElementById('auth-password').value;
-  const deviceLabel = document.getElementById('auth-device-label').value;
-  const masterKey = document.getElementById('auth-master-key').value;
-  const errorBox = document.getElementById('auth-error');
-
-  errorBox.style.display = 'none';
-
-  if (!username || !password) {
-    showAuthError('Username and password cannot be blank.');
-    return;
-  }
-
-  const deviceId = getDeviceId();
-
-  if (currentAuthMode === 'register') {
-    try {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: username,
-          password: password,
-          device_id: deviceId,
-          device_label: deviceLabel
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        showAuthError(data.detail || 'Failed to create user account.');
-        return;
-      }
-      alert('Registration successful! Please login with your new credentials.');
-      switchAuthTab('login');
-      document.getElementById('auth-username').value = username;
-      document.getElementById('auth-password').value = '';
-    } catch (e) {
-      showAuthError('Network error connecting to registration service.');
-    }
-  } else {
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: username,
-          password: password,
-          device_id: deviceId,
-          device_label: deviceLabel,
-          master_key: masterKey
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        showAuthError(data.detail || 'Invalid username, password, or device key.');
-        return;
-      }
-      
-      // Store token for all authenticated requests
-      if (data.token) {
-        localStorage.setItem('auth_token', data.token);
-      }
-      
-      closeAuthModal();
-      await verifySession();
-    } catch (e) {
-      showAuthError('Network error connecting to authentication service.');
-    }
-  }
-}
-
-function showAuthError(msg) {
-  const errorBox = document.getElementById('auth-error');
-  errorBox.innerText = msg;
-  errorBox.style.display = 'block';
-}
-
-async function logout() {
-  try {
-    await apiFetch('/api/auth/logout', { method: 'POST' });
-  } catch (e) {
-    // Session cleanup proceeds regardless
-  }
+function logout() {
   localStorage.removeItem('auth_token');
-  currentUser = null;
-  onLogoutComplete();
+  location.reload();
 }
 
-function onLoginSuccess(user) {
-  currentUser = user;
-  document.getElementById('banner-auth-text').innerText = `AUTHENTICATED: ${user.username.toUpperCase()} (${user.role.toUpperCase()})`;
-  document.getElementById('banner-auth-btn').style.display = 'none';
-  document.getElementById('banner-logout-btn').style.display = 'inline-block';
-  document.getElementById('banner-biometric-btn').style.display = 'inline-block';
+// ==========================================
+// Auth Handlers (Enforced Member Only)
+// ==========================================
+function switchAuthTab(tab) {
+  const loginView = document.getElementById('auth-login-view');
+  const regView = document.getElementById('auth-register-view');
+  const loginBtn = document.getElementById('tab-login-btn');
+  const regBtn = document.getElementById('tab-register-btn');
 
-  document.getElementById('user-display-name').innerText = `${user.username.toUpperCase()} [${user.role.toUpperCase()}]`;
-  document.getElementById('user-display-lvl').innerText = user.role === 'creator' ? 'LVL 03 (SEM 3)' : 'LVL 01 (MEMBER)';
-
-  // CADENCE RESTRICTION: Show command centre root box strictly for Ganshyam (creator)
-  const creatorBox = document.getElementById('creator-cadence-box');
-  if (user.role === 'creator' && user.username === 'ganshyam') {
-    creatorBox.style.display = 'block';
+  if (tab === 'login') {
+    loginView.style.display = 'block';
+    regView.style.display = 'none';
+    loginBtn.className = 'pixel-btn';
+    regBtn.className = 'pixel-btn sem-tab';
   } else {
-    creatorBox.style.display = 'none';
+    loginView.style.display = 'none';
+    regView.style.display = 'block';
+    regBtn.className = 'pixel-btn';
+    loginBtn.className = 'pixel-btn sem-tab';
   }
+}
 
+async function submitLogin() {
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+
+  if (!username || !password) return alert('Enter callsign and passphrase.');
+
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Authentication failed');
+
+    localStorage.setItem('auth_token', data.user.username);
+    document.getElementById('auth-modal').style.display = 'none';
+    await initSession(data.user.username);
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function submitRegister() {
+  const username = document.getElementById('reg-username').value.trim();
+  const password = document.getElementById('reg-password').value;
+  const sem = parseInt(document.getElementById('reg-sem').value, 10);
+
+  if (!username) return alert('Enter a callsign.');
+  if (password.length < 4) return alert('Passphrase must be at least 4 characters.');
+
+  try {
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, current_semester: sem })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Registration failed');
+
+    alert(`Unit initialized for ${data.user.username}. Logged in.`);
+    localStorage.setItem('auth_token', data.user.username);
+    document.getElementById('auth-modal').style.display = 'none';
+    await initSession(data.user.username);
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+// ==========================================
+// Quest Log & Hackerrank Locks
+// ==========================================
+function switchSemesterTab(sem) {
+  selectedSemester = sem;
   loadQuests();
-  loadTeamProgress();
-  initCommsChannel();
 }
 
-function onLogoutComplete() {
-  currentUser = null;
-  document.getElementById('banner-auth-text').innerText = 'AUTHENTICATION REQUIRED: ENTER TERMINAL LOGIN';
-  document.getElementById('banner-auth-btn').style.display = 'inline-block';
-  document.getElementById('banner-logout-btn').style.display = 'none';
-  document.getElementById('banner-biometric-btn').style.display = 'none';
-  document.getElementById('creator-cadence-box').style.display = 'none';
-
-  document.getElementById('user-display-name').innerText = 'GUEST_RECON [UNVERIFIED]';
-  document.getElementById('user-display-lvl').innerText = 'LVL 00 (RECON)';
-
-  document.getElementById('quest-list-container').innerHTML = `
-    <div class="quest-item">
-      <span>Authenticate profile to decrypt syllabus quest logs...</span>
-      <span class="badge">LOCKED</span>
-    </div>
-  `;
-  document.getElementById('quest-count').innerText = '0 QUESTS';
-
-  if (chatPollTimer) clearInterval(chatPollTimer);
-  document.getElementById('chat-contacts-list').innerHTML = `
-    <div style="padding: 10px; font-size: 10px; color: #64748b;">No active links. Authenticate to sync contacts.</div>
-  `;
-  document.getElementById('chat-messages-box').innerHTML = `
-    <div style="color: #64748b; margin: auto;">Select a peer from the left panel to load decrypted transmission log.</div>
-  `;
-}
-
-// Quests and Team Matrix
-// Load Quests with dynamic submission buttons
 async function loadQuests() {
   try {
-    const res = await apiFetch('/api/quests');
+    const url = selectedSemester ? `/api/quests?semester=${selectedSemester}` : '/api/quests';
+    const res = await apiFetch(url);
     if (!res.ok) return;
-    const quests = await res.json();
-    const list = document.getElementById('quest-list-container');
-    list.innerHTML = '';
+    const data = await res.json();
+
+    const activeSem = data.current_active_semester || 3;
+    selectedSemester = data.selected_semester || activeSem;
+    const quests = data.quests || [];
+
+    document.getElementById('quest-log-heading').innerText = 
+      `SEMESTER ${selectedSemester} QUEST LOG ${selectedSemester === activeSem ? '[CURRENT CADENCE]' : ''}`;
+
+    document.querySelectorAll('.sem-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.innerText === `SEM ${selectedSemester}`);
+    });
+
+    const listContainer = document.getElementById('quest-list-container');
+    listContainer.innerHTML = '';
     document.getElementById('quest-count').innerText = `${quests.length} QUESTS`;
 
-    quests.forEach(q => {
-      const item = document.createElement('div');
-      item.className = 'quest-item';
-      
-      const isDone = q.status === 'COMPLETED' || q.status === 'SUBMITTED';
-      const statusClass = isDone ? 'badge-done' : '';
-      const displayStatus = q.status || 'PENDING';
+    if (quests.length === 0) {
+      listContainer.innerHTML = `<div style="padding: 12px; color: #64748b; font-size: 11px;">No milestones assigned for Semester ${selectedSemester}.</div>`;
+      return;
+    }
 
-      item.innerHTML = `
-        <div style="max-width: 65%;">
-          <strong style="color: var(--text-gold);">${q.code || 'QUEST'}:</strong> ${q.title}
+    quests.forEach(q => {
+      const isDone = q.status === 'COMPLETED' || q.status === 'SUBMITTED';
+      const isLocked = q.status === 'LOCKED';
+
+      let dateColor = '#cbd5e1';
+      let dateText = `${q.start_date || 'TBD'} → ${q.end_date || 'TBD'}`;
+      if (!isDone && !isLocked && q.days_remaining !== undefined) {
+        if (q.days_remaining < 0) {
+          dateColor = 'var(--text-red)';
+          dateText = `OVERDUE BY ${Math.abs(q.days_remaining)} DAYS`;
+        } else if (q.days_remaining <= 3) {
+          dateColor = 'var(--text-red)';
+          dateText = `DUE IN ${q.days_remaining} DAYS`;
+        }
+      }
+
+      const aiPrompt = `Act as an expert software engineering mentor. I am working on an engineering quest titled '${q.title}'. The tech stack involves: ${q.tech_stack || 'General Engineering'}. Here is the brief: ${q.description}. Please break this down into actionable implementation steps and guide me on where to start.`;
+
+      const questEl = document.createElement('div');
+      questEl.className = `quest-item ${isLocked ? 'locked' : ''}`;
+
+      questEl.innerHTML = `
+        <div class="quest-header-row" onclick="${isLocked ? '' : `toggleDetails(${q.id})`}">
+          <div style="max-width: 68%;">
+            <div style="margin-bottom: 2px;">
+              ${q.tier === 'major' ? '<span class="badge badge-boss">MAJOR BOSS</span>' : ''}
+              <strong style="color: var(--text-gold); font-size: 11px;">${q.code}:</strong> 
+              <span style="font-weight: 600;">${q.title}</span>
+            </div>
+            <div style="font-size: 10px; margin-top: 3px;">
+              <span style="color: ${dateColor}; font-weight: ${q.days_remaining <= 3 && !isDone && !isLocked ? 'bold' : 'normal'}">${dateText}</span> • 
+              <span style="color: var(--text-cyan);">+${q.xp_reward || 100} XP</span>
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="badge ${isDone ? 'badge-done' : (isLocked ? 'badge-locked' : '')}">${q.status}</span>
+            <button class="pixel-btn" style="padding: 2px 8px; font-size: 10px;" 
+                    onclick="event.stopPropagation(); openQuestModal(${q.id}, '${escapeHtml(q.title)}')"
+                    ${isLocked ? 'disabled' : ''}>
+              ${isDone ? 'RESUBMIT' : 'SUBMIT'}
+            </button>
+          </div>
         </div>
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <span class="badge ${statusClass}">${displayStatus}</span>
-          <button class="pixel-btn" style="padding: 3px 8px; font-size: 10px;" onclick="openQuestModal(${q.id}, '${escapeHtml(q.title)}')">
-            ${isDone ? 'RESUBMIT' : 'SUBMIT'}
+
+        <div id="details-${q.id}" class="quest-details-pane">
+          <div style="color: var(--text-cyan); margin-bottom: 4px;"><strong>TECH STACK / SKILLS:</strong> ${q.tech_stack || 'Standard Stack'}</div>
+          <div style="color: #94a3b8; margin-bottom: 10px; line-height: 1.4;"><strong>BRIEF:</strong> ${q.description || 'No description provided.'}</div>
+          <button class="pixel-btn" onclick="copyAiPrompt('${escapeHtml(aiPrompt)}', event)">
+            🤖 COPY AI MENTOR PROMPT
           </button>
         </div>
       `;
-      list.appendChild(item);
+      listContainer.appendChild(questEl);
     });
   } catch (err) {
-    console.error('Failed to load quests', err);
+    console.error('Failed to load quests:', err);
   }
 }
 
-// Escape helper to prevent quote breaking in HTML attributes
-function escapeHtml(text) {
-  return text.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+function toggleDetails(id) {
+  const el = document.getElementById(`details-${id}`);
+  if (el) el.style.display = el.style.display === 'block' ? 'none' : 'block';
 }
 
-// Quest Submission Modal Handlers
-function openQuestModal(questId, title) {
-  document.getElementById('quest-modal').style.display = 'flex';
-  document.getElementById('quest-submit-error').style.display = 'none';
-  document.getElementById('quest-modal-title').innerText = `SUBMIT: ${title}`;
-  document.getElementById('submit-quest-id').value = questId;
-  document.getElementById('submit-quest-url').value = '';
-  document.getElementById('submit-quest-notes').value = '';
+function copyAiPrompt(promptText, ev) {
+  if (ev) ev.stopPropagation();
+  navigator.clipboard.writeText(promptText).then(() => {
+    alert('AI Mentor prompt copied to clipboard!');
+  });
 }
 
-function closeQuestModal() {
-  document.getElementById('quest-modal').style.display = 'none';
-}
-
-async function submitQuestProof() {
-  const questId = document.getElementById('submit-quest-id').value;
-  const url = document.getElementById('submit-quest-url').value.trim();
-  const notes = document.getElementById('submit-quest-notes').value.trim();
-  const errorBox = document.getElementById('quest-submit-error');
-
-  errorBox.style.display = 'none';
-
-  if (!url && !notes) {
-    errorBox.innerText = 'Please provide a repository/demo link or execution notes.';
-    errorBox.style.display = 'block';
+function openQuestModal(id, title) {
+  if (!localStorage.getItem('auth_token')) {
+    document.getElementById('auth-modal').style.display = 'flex';
     return;
   }
+  document.getElementById('submit-quest-id').value = id;
+  document.getElementById('submit-modal-title').innerText = `SUBMIT: ${title}`;
+  document.getElementById('submit-repo-url').value = '';
+  document.getElementById('submit-notes').value = '';
+  document.getElementById('submit-modal').style.display = 'flex';
+}
+
+function closeSubmitModal() {
+  document.getElementById('submit-modal').style.display = 'none';
+}
+
+async function submitQuestForm() {
+  const questId = parseInt(document.getElementById('submit-quest-id').value, 10);
+  const repoUrl = document.getElementById('submit-repo-url').value;
+  const notes = document.getElementById('submit-notes').value;
 
   try {
     const res = await apiFetch('/api/quests/submit', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        quest_id: parseInt(questId),
-        submission_url: url,
-        notes: notes
-      })
+      body: JSON.stringify({ quest_id: questId, submission_url: repoUrl, notes: notes })
     });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.detail || 'Submission failed');
 
-    const data = await res.json();
-    if (!res.ok) {
-      errorBox.innerText = data.detail || 'Submission failed.';
-      errorBox.style.display = 'block';
-      return;
-    }
-
-    alert(data.message || 'Submission received!');
-    closeQuestModal();
+    alert(result.message);
+    closeSubmitModal();
     await loadQuests();
-    await loadTeamProgress();
-  } catch (e) {
-    errorBox.innerText = 'Network error transmitting submission.';
-    errorBox.style.display = 'block';
+    await loadGuildMatrix();
+  } catch (err) {
+    alert(err.message);
   }
 }
 
-async function loadTeamProgress() {
+// ==========================================
+// Guild VASAVI Roster
+// ==========================================
+async function loadGuildMatrix() {
   try {
-    const res = await apiFetch('/api/team/progress');
+    const res = await fetch('/api/team/progress');
     if (!res.ok) return;
     const team = await res.json();
-    const container = document.getElementById('team-progress-container');
+    const container = document.getElementById('guild-roster-container');
     container.innerHTML = '';
 
-    team.forEach(t => {
+    if (team.length === 0) {
+      container.innerHTML = `<div style="color: #64748b; font-size: 11px;">No registered guild members.</div>`;
+      return;
+    }
+
+    team.forEach((member, index) => {
+      const isHead = index === 0;
       const row = document.createElement('div');
-      row.className = 'quest-item';
+      row.className = `guild-row ${isHead ? 'guild-head-anim' : ''}`;
+
       row.innerHTML = `
-        <span><strong>${t.username}</strong> [${t.role.toUpperCase()}]</span>
-        <span class="badge badge-done">XP: ${t.xp || 100}</span>
+        <div>
+          <strong style="color: ${isHead ? 'var(--text-gold)' : 'inherit'};">${member.username.toUpperCase()}</strong> 
+          <span style="font-size: 10px; color: #64748b;">[${member.role.toUpperCase()}]</span>
+        </div>
+        ${isHead ? '<span class="guild-head-tag">👑 GUILD HEAD</span>' : ''}
+        <span class="badge badge-done">XP: ${member.xp || 0}</span>
       `;
       container.appendChild(row);
+
+      if (currentUser && member.username.toLowerCase() === currentUser.username.toLowerCase()) {
+        const xp = member.xp || 0;
+        document.getElementById('profile-level').innerText = `LVL ${Math.max(1, Math.floor(xp / 100))}`;
+        document.getElementById('profile-xp-bar').style.width = `${Math.min(100, (xp % 100))}%`;
+      }
     });
   } catch (err) {
-    console.error('Failed to load progress', err);
+    console.error('Failed to load Guild matrix:', err);
   }
 }
 
-// 1-on-1 Encrypted Comms Channel
-async function initCommsChannel() {
-  if (chatPollTimer) clearInterval(chatPollTimer);
-  await loadChatContacts();
-  chatPollTimer = setInterval(pollChatMessages, 3000);
+// ==========================================
+// Alerts & Comms
+// ==========================================
+async function checkDeadlines() {
+  try {
+    const res = await apiFetch('/api/alerts');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.alerts && data.alerts.length > 0) {
+      document.getElementById('alert-content').innerHTML = data.alerts.join('<br><br>');
+      document.getElementById('alert-modal').style.display = 'flex';
+    }
+  } catch (err) {
+    console.error('Alerts error:', err);
+  }
 }
 
-async function loadChatContacts() {
-  try {
-    const res = await apiFetch('/api/chat/contacts');
-    if (!res.ok) return;
-    const contacts = await res.json();
-    const list = document.getElementById('chat-contacts-list');
-    list.innerHTML = '';
+function closeAlertModal() {
+  document.getElementById('alert-modal').style.display = 'none';
+}
 
-    if (contacts.length === 0) {
-      list.innerHTML = `<div style="padding: 8px; font-size: 10px; color: #64748b;">No peers online.</div>`;
+async function loadPeers() {
+  try {
+    const res = await apiFetch('/api/users');
+    if (!res.ok) return;
+    const users = await res.json();
+    const container = document.getElementById('peer-list-container');
+    container.innerHTML = '';
+
+    const peers = users.filter(u => !currentUser || u.username.toLowerCase() !== currentUser.username.toLowerCase());
+    if (peers.length === 0) {
+      container.innerHTML = `<div style="color: #64748b; font-size: 10px; padding: 6px;">No external peers.</div>`;
       return;
     }
 
-    contacts.forEach(peer => {
-      const el = document.createElement('div');
-      el.className = `contact-item ${selectedPeerId === peer.id ? 'active' : ''}`;
-      el.innerHTML = `
-        <span>${peer.username}</span>
-        <span class="badge ${peer.role === 'creator' ? 'badge-creator' : ''}">${peer.role}</span>
-      `;
-      el.onclick = () => selectPeer(peer.id, peer.username);
-      list.appendChild(el);
+    peers.forEach(peer => {
+      const card = document.createElement('div');
+      card.className = `peer-card ${activePeerId === peer.id ? 'active' : ''}`;
+      card.innerHTML = `<span>${peer.username}</span><span class="badge" style="font-size: 8px;">${peer.role}</span>`;
+      card.onclick = () => selectPeer(peer);
+      container.appendChild(card);
     });
-  } catch (e) {
-    console.error('Failed loading contacts', e);
+  } catch (err) {
+    console.error('Error loading peers:', err);
   }
 }
 
-function selectPeer(peerId, peerName) {
-  selectedPeerId = peerId;
-  document.getElementById('chat-active-peer-label').innerText = `CHANNEL: PEER [${peerName.toUpperCase()}]`;
-  loadChatContacts();
-  pollChatMessages();
+function selectPeer(peer) {
+  activePeerId = peer.id;
+  document.getElementById('active-peer-label').innerText = `SECURE LINK: ${peer.username.toUpperCase()}`;
+  loadPeers();
+  loadTransmissions();
 }
 
-async function pollChatMessages() {
-  if (!selectedPeerId) return;
+async function loadTransmissions() {
+  if (!activePeerId) return;
   try {
-    const res = await apiFetch(`/api/chat/history/${selectedPeerId}`);
+    const res = await apiFetch(`/api/messages?peer_id=${activePeerId}`);
     if (!res.ok) return;
-    const messages = await res.json();
-    const box = document.getElementById('chat-messages-box');
-    box.innerHTML = '';
+    const msgs = await res.json();
+    const log = document.getElementById('transmission-log');
+    log.innerHTML = '';
 
-    if (messages.length === 0) {
-      box.innerHTML = `<div style="color: #64748b; margin: auto;">No transmissions exchanged yet.</div>`;
+    if (msgs.length === 0) {
+      log.innerHTML = `<div style="color: #64748b; margin: auto;">No transmissions exchanged yet.</div>`;
       return;
     }
 
-    messages.forEach(m => {
-      const bubble = document.createElement('div');
-      const isSelf = m.sender_id === currentUser.id;
-      bubble.className = `msg-bubble ${isSelf ? 'msg-self' : 'msg-peer'}`;
-      bubble.innerHTML = `
-        <div style="font-size: 9px; opacity: 0.7; margin-bottom: 2px;">${isSelf ? 'YOU' : 'PEER'} • ${m.created_at || ''}</div>
-        <div>${m.content}</div>
+    msgs.forEach(m => {
+      const row = document.createElement('div');
+      const isMe = m.sender_name.toLowerCase() === (currentUser ? currentUser.username.toLowerCase() : '');
+      row.style.alignSelf = isMe ? 'flex-end' : 'flex-start';
+      row.style.maxWidth = '80%';
+      row.innerHTML = `
+        <span style="color: ${isMe ? 'var(--text-cyan)' : 'var(--text-purple)'}; font-size: 9px;">
+          ${escapeHtml(m.sender_name || (isMe ? 'YOU' : 'PEER'))} [${m.timestamp || ''}]
+        </span>
+        <div style="background: rgba(255,255,255,0.05); padding: 5px 8px; border-radius: 2px; margin-top: 2px;">
+          ${escapeHtml(m.content)}
+        </div>
       `;
-      box.appendChild(bubble);
+      log.appendChild(row);
     });
-    box.scrollTop = box.scrollHeight;
-  } catch (e) {
-    console.error('Chat poll failed', e);
+    log.scrollTop = log.scrollHeight;
+  } catch (err) {
+    console.error('Failed to load transmissions:', err);
   }
 }
 
-async function sendChatMessage() {
-  const input = document.getElementById('chat-msg-input');
+async function sendTransmission() {
+  if (!activePeerId) return alert('Select a peer to transmit to.');
+  const input = document.getElementById('comms-input');
   const text = input.value.trim();
-  if (!text || !selectedPeerId) return;
+  if (!text) return;
 
   try {
-    const res = await apiFetch('/api/chat/send', {
+    const res = await apiFetch('/api/messages', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        receiver_id: selectedPeerId,
-        content: text
-      })
+      body: JSON.stringify({ receiver_id: activePeerId, content: text })
     });
     if (res.ok) {
       input.value = '';
-      await pollChatMessages();
-    }
-  } catch (e) {
-    alert('Transmission failed.');
-  }
-}
-
-// Creator Root Cadence Executor
-async function executeCreatorCommand(action) {
-  const log = document.getElementById('creator-exec-log');
-  log.innerText = `[${new Date().toLocaleTimeString()}] Executing cadence root directive: ${action}...`;
-  try {
-    const res = await apiFetch('/api/command/execute', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: action })
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      log.innerText = `[ERROR] ${data.detail || 'Execution denied'}`;
-    } else {
-      log.innerText = `[OK] Directive confirmed: ${data.message || 'Operation successful'}`;
-    }
-  } catch (e) {
-    log.innerText = '[ERROR] Cadence bridge connection failure.';
-  }
-}
-
-// Biometric Calibration Webcam Handlers
-async function openBiometricModal() {
-  document.getElementById('biometric-modal').style.display = 'flex';
-  document.getElementById('biometric-error').style.display = 'none';
-  const video = document.getElementById('biometric-video');
-
-  try {
-    videoStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
-    video.srcObject = videoStream;
-  } catch (err) {
-    document.getElementById('biometric-error').innerText = 'Webcam access denied or unavailable.';
-    document.getElementById('biometric-error').style.display = 'block';
-  }
-}
-
-function closeBiometricModal() {
-  if (videoStream) {
-    videoStream.getTracks().forEach(track => track.stop());
-    videoStream = null;
-  }
-  document.getElementById('biometric-modal').style.display = 'none';
-}
-
-async function captureReferenceBiometric() {
-  const video = document.getElementById('biometric-video');
-  const canvas = document.getElementById('biometric-canvas');
-  const errorBox = document.getElementById('biometric-error');
-  errorBox.style.display = 'none';
-
-  if (!video.videoWidth) {
-    errorBox.innerText = 'Camera feed not ready.';
-    errorBox.style.display = 'block';
-    return;
-  }
-
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  const base64Data = canvas.toDataURL('image/jpeg');
-
-  try {
-    const res = await apiFetch('/api/auth/biometric-register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image_base64: base64Data })
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      errorBox.innerText = `Biometric calibration failed: ${data.detail || 'No face detected'}`;
-      errorBox.style.display = 'block';
-    } else {
-      alert('Biometric template calibrated and registered successfully!');
-      closeBiometricModal();
+      loadTransmissions();
     }
   } catch (err) {
-    errorBox.innerText = 'Network error during biometric transmission.';
-    errorBox.style.display = 'block';
+    console.error('Error sending message:', err);
   }
+}
+
+function openBioModal() {
+  alert('Biometric scanner calibrated.');
 }

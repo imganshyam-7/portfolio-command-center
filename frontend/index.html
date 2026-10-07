@@ -3,525 +3,178 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ECE RPG - Command Center</title>
-  <link rel="stylesheet" href="/static/style.css">
-  <style>
-    :root {
-      --bg-dark: #0a0b10;
-      --box-bg: #121422;
-      --box-border: #3b4261;
-      --text-primary: #e2e8f0;
-      --text-gold: #fbbf24;
-      --hp-green: #22c55e;
-      --xp-blue: #38bdf8;
-      --danger-red: #ef4444;
-      --creator-purple: #a855f7;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      font-family: 'Courier New', Courier, monospace;
-    }
-
-    body {
-      background-color: var(--bg-dark);
-      color: var(--text-primary);
-      padding: 16px;
-      line-height: 1.4;
-    }
-
-    .pixel-box {
-      background: var(--box-bg);
-      border: 2px solid var(--box-border);
-      padding: 12px;
-      position: relative;
-      margin-bottom: 14px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-    }
-
-    .box-title {
-      font-size: 11px;
-      font-weight: bold;
-      color: var(--text-gold);
-      letter-spacing: 1px;
-      margin-bottom: 10px;
-      text-transform: uppercase;
-      border-bottom: 1px solid var(--box-border);
-      padding-bottom: 4px;
-      display: flex;
-      justify-content: space-between;
-    }
-
-    .pixel-btn {
-      background: #1e2238;
-      border: 2px solid var(--box-border);
-      color: var(--text-primary);
-      padding: 6px 12px;
-      font-size: 11px;
-      cursor: pointer;
-      text-transform: uppercase;
-      font-weight: bold;
-      transition: all 0.15s ease-in-out;
-    }
-
-    .pixel-btn:hover {
-      background: var(--text-gold);
-      color: #000;
-      border-color: var(--text-gold);
-    }
-
-    .pixel-btn.btn-danger {
-      border-color: var(--danger-red);
-      color: var(--danger-red);
-    }
-    .pixel-btn.btn-danger:hover {
-      background: var(--danger-red);
-      color: #fff;
-    }
-
-    .pixel-input, .pixel-select {
-      width: 100%;
-      background: #090a12;
-      border: 1px solid var(--box-border);
-      color: var(--text-primary);
-      padding: 8px;
-      font-size: 12px;
-      margin-bottom: 8px;
-      outline: none;
-    }
-
-    .pixel-input:focus, .pixel-select:focus {
-      border-color: var(--text-gold);
-    }
-
-    /* Top Auth Banner */
-    #auth-banner {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 12px;
-      font-size: 11px;
-      background: #14172b;
-      border: 1px dashed var(--box-border);
-      margin-bottom: 12px;
-    }
-
-    /* Character Profile Bar */
-    .profile-bar {
-      display: flex;
-      gap: 16px;
-      align-items: center;
-    }
-
-    .bot-avatar {
-      width: 56px;
-      height: 56px;
-      background: #1f1b38;
-      border: 2px solid var(--creator-purple);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 24px;
-    }
-
-    .profile-info {
-      flex: 1;
-    }
-
-    .profile-header-row {
-      display: flex;
-      justify-content: space-between;
-      font-size: 12px;
-      margin-bottom: 6px;
-      font-weight: bold;
-    }
-
-    .stat-bar {
-      height: 10px;
-      background: #090a14;
-      border: 1px solid var(--box-border);
-      margin-bottom: 6px;
-      position: relative;
-    }
-
-    .stat-fill-hp {
-      height: 100%;
-      background: var(--hp-green);
-      width: 100%;
-    }
-
-    .stat-fill-xp {
-      height: 100%;
-      background: var(--xp-blue);
-      width: 35%;
-    }
-
-    /* Grid Layout */
-    .board-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 14px;
-    }
-
-    @media (max-width: 900px) {
-      .board-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    /* Quest list & Matrix */
-    .quest-item {
-      background: #0d0f1a;
-      border: 1px solid #23273e;
-      padding: 8px;
-      margin-bottom: 6px;
-      font-size: 11px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .badge {
-      font-size: 9px;
-      padding: 2px 6px;
-      border-radius: 2px;
-      background: #272d47;
-      color: #94a3b8;
-    }
-
-    .badge-creator {
-      background: #581c87;
-      color: #e9d5ff;
-    }
-
-    .badge-done {
-      background: #14532d;
-      color: #86efac;
-    }
-
-    /* Chat Section */
-    .chat-layout {
-      display: grid;
-      grid-template-columns: 180px 1fr;
-      gap: 10px;
-      height: 280px;
-    }
-
-    .contacts-list {
-      background: #090a14;
-      border: 1px solid var(--box-border);
-      overflow-y: auto;
-    }
-
-    .contact-item {
-      padding: 8px;
-      font-size: 11px;
-      cursor: pointer;
-      border-bottom: 1px solid #1a1e33;
-      display: flex;
-      justify-content: space-between;
-    }
-
-    .contact-item:hover, .contact-item.active {
-      background: #1a2035;
-      color: var(--text-gold);
-    }
-
-    .chat-window {
-      display: flex;
-      flex-direction: column;
-      background: #090a14;
-      border: 1px solid var(--box-border);
-      padding: 8px;
-    }
-
-    .chat-messages {
-      flex: 1;
-      overflow-y: auto;
-      font-size: 11px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      padding-bottom: 8px;
-    }
-
-    .msg-bubble {
-      max-width: 80%;
-      padding: 6px 10px;
-      border-radius: 2px;
-      word-break: break-word;
-    }
-
-    .msg-self {
-      align-self: flex-end;
-      background: #1e293b;
-      border-left: 2px solid var(--xp-blue);
-    }
-
-    .msg-peer {
-      align-self: flex-start;
-      background: #181d2f;
-      border-left: 2px solid var(--creator-purple);
-    }
-
-    .chat-input-row {
-      display: flex;
-      gap: 6px;
-      margin-top: 4px;
-    }
-
-    /* Creator-only Root Cadence */
-    .creator-only {
-      display: none;
-      border-color: var(--creator-purple);
-    }
-
-    /* Modal Backdrop */
-    .modal-backdrop {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.85);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      z-index: 1000;
-    }
-
-    .modal-box {
-      width: 440px;
-      max-width: 95%;
-      border-color: var(--text-gold);
-      background: #0f111d;
-    }
-
-    .modal-tabs {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-
-    .modal-tabs .pixel-btn {
-      flex: 1;
-      background: #0d0f1b;
-    }
-
-    .modal-tabs .pixel-btn.active {
-      background: var(--text-gold);
-      color: #000;
-      border-color: var(--text-gold);
-    }
-
-    .error-banner {
-      background: rgba(239, 68, 68, 0.15);
-      border: 1px solid var(--danger-red);
-      color: var(--danger-red);
-      font-size: 11px;
-      padding: 8px;
-      margin-bottom: 10px;
-      display: none;
-    }
-
-    #biometric-video {
-      width: 100%;
-      height: 220px;
-      object-fit: cover;
-      background: #000;
-      border: 1px solid var(--box-border);
-      margin-bottom: 8px;
-    }
-  </style>
+  <title>ECE RPG - Portfolio Command Center</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <!-- Top Access State Banner -->
-  <div id="auth-banner">
+<div class="container">
+
+  <!-- Status Bar -->
+  <div class="panel status-bar">
     <div>
       <span style="color: var(--text-gold);">SECURITY STATUS:</span>
-      <span id="banner-auth-text">AUTHENTICATION REQUIRED: ENTER TERMINAL LOGIN</span>
+      <span id="auth-status-label">INITIALIZING...</span>
     </div>
-    <div>
-      <button id="banner-auth-btn" class="pixel-btn" onclick="openAuthModal()">LOGIN / REGISTER</button>
-      <button id="banner-biometric-btn" class="pixel-btn" style="margin-left: 6px; display: none;" onclick="openBiometricModal()">BIOMETRIC CALIBRATION</button>
-      <button id="banner-logout-btn" class="pixel-btn btn-danger" style="margin-left: 6px; display: none;" onclick="logout()">LOGOUT</button>
+    <div style="display: flex; gap: 8px;">
+      <button class="pixel-btn" onclick="openBioModal()">BIOMETRIC CALIBRATION</button>
+      <button class="pixel-btn btn-danger" onclick="logout()">LOGOUT</button>
     </div>
   </div>
 
-  <!-- Character / Identity HUD -->
-  <div class="pixel-box">
-    <div class="profile-bar">
-      <div class="bot-avatar" id="avatar-icon">👾</div>
-      <div class="profile-info">
-        <div class="profile-header-row">
-          <span id="user-display-name">GUEST_RECON [UNVERIFIED]</span>
-          <span id="user-display-lvl">LVL 00 (RECON)</span>
-        </div>
-        <div class="stat-bar"><div id="hp-bar" class="stat-fill-hp" style="width: 100%;"></div></div>
-        <div class="stat-bar"><div id="xp-bar" class="stat-fill-xp" style="width: 0%;"></div></div>
+  <!-- Player Profile -->
+  <div class="panel profile-card">
+    <div class="avatar-box">👾</div>
+    <div class="profile-details">
+      <div class="profile-meta">
+        <span id="profile-name-role">GUEST VISITOR</span>
+        <span id="profile-level" style="color: var(--text-gold);">LVL 01</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div id="profile-xp-bar" class="progress-bar-fill"></div>
       </div>
     </div>
   </div>
 
-  <!-- Main System Layout -->
-  <div class="board-grid">
-    <!-- Semester 3 Active Quest Log -->
-    <div class="pixel-box">
-      <div class="box-title">
-        <span>SEMESTER 3 ACTIVE QUEST LOG</span>
+  <!-- Main Section -->
+  <div class="grid-2">
+    
+    <!-- Quests Column -->
+    <div class="panel">
+      <div class="panel-header">
+        <span id="quest-log-heading" class="panel-title">SEMESTER 3 ACTIVE QUEST LOG</span>
         <span id="quest-count" class="badge">0 QUESTS</span>
       </div>
-      <div id="quest-list-container">
-        <div class="quest-item">
-          <span>Authenticate profile to decrypt syllabus quest logs...</span>
-          <span class="badge">LOCKED</span>
-        </div>
+
+      <!-- Semester Navigation -->
+      <div style="display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap;">
+        <button class="pixel-btn sem-tab active" onclick="switchSemesterTab(3)">SEM 3</button>
+        <button class="pixel-btn sem-tab" onclick="switchSemesterTab(4)">SEM 4</button>
+        <button class="pixel-btn sem-tab" onclick="switchSemesterTab(5)">SEM 5</button>
+        <button class="pixel-btn sem-tab" onclick="switchSemesterTab(6)">SEM 6</button>
+        <button class="pixel-btn sem-tab" onclick="switchSemesterTab(7)">SEM 7</button>
+      </div>
+
+      <div id="quest-list-container" class="quest-list">
+        <div style="color: #64748b; font-size: 11px;">Loading syllabus milestones...</div>
       </div>
     </div>
 
-    <!-- Execution Matrix & Team Progress -->
-    <div class="pixel-box">
-      <div class="box-title">TEAM PROGRESS & POD EXECUTION MATRIX</div>
-      <div id="team-progress-container">
-        <div class="quest-item">
-          <span>POD A: Software & RTL Architecture</span>
-          <span class="badge badge-done">SYNCED</span>
+    <!-- Guild VASAVI Column -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title" style="color: var(--text-gold);">⚔️ GUILD VASAVI: EXECUTION MATRIX</span>
+      </div>
+      <div id="guild-roster-container" class="guild-list">
+        <div style="color: #64748b; font-size: 11px;">Synchronizing roster nodes...</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Comms Terminal -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">ENCRYPTED 1-ON-1 COMMS TERMINAL</span>
+      <span id="active-peer-label" style="font-size: 10px; color: var(--text-cyan);">SELECT A PEER TO BEGIN</span>
+    </div>
+    <div class="comms-container">
+      <div id="peer-list-container" class="peer-roster"></div>
+      <div class="terminal-view">
+        <div id="transmission-log" class="transmission-log">
+          <div style="color: #64748b; margin: auto;">Select a peer from the roster to open transmission stream.</div>
         </div>
-        <div class="quest-item">
-          <span>POD B: Embedded Systems & OpenCV Vision</span>
-          <span class="badge badge-done">CALIBRATED</span>
-        </div>
-        <div class="quest-item">
-          <span>POD C: Quest Verification & Reactive UI</span>
-          <span class="badge badge-done">OPERATIONAL</span>
+        <div class="terminal-input-bar">
+          <input type="text" id="comms-input" placeholder="Enter transmission..." onkeydown="if(event.key==='Enter') sendTransmission()">
+          <button class="pixel-btn" onclick="sendTransmission()">TRANSMIT</button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Private Comms Channel -->
-  <div class="pixel-box" id="comms-panel">
-    <div class="box-title">
-      <span>ENCRYPTED 1-ON-1 COMMS TERMINAL</span>
-      <span id="chat-active-peer-label" style="color: var(--xp-blue);">SELECT A PEER TO BEGIN</span>
-    </div>
-    <div class="chat-layout">
-      <div class="contacts-list" id="chat-contacts-list">
-        <div style="padding: 10px; font-size: 10px; color: #64748b;">No active links. Authenticate to sync contacts.</div>
-      </div>
-      <div class="chat-window">
-        <div class="chat-messages" id="chat-messages-box">
-          <div style="color: #64748b; margin: auto;">Select a peer from the left panel to load decrypted transmission log.</div>
-        </div>
-        <div class="chat-input-row">
-          <input type="text" id="chat-msg-input" class="pixel-input" style="margin-bottom: 0;" placeholder="Enter transmission..." onkeydown="if(event.key === 'Enter') sendChatMessage()">
-          <button class="pixel-btn" onclick="sendChatMessage()">TRANSMIT</button>
-        </div>
-      </div>
-    </div>
-  </div>
+</div>
 
-  <!-- Creator-Only Command Cadence Section -->
-  <div class="pixel-box creator-only" id="creator-cadence-box">
-    <div class="box-title" style="color: var(--creator-purple);">
-      <span>[CADENCE RESTRICTED] COMMAND CENTRE ROOT MATRIX</span>
-      <span class="badge badge-creator">GANSHYAM CLEARANCE</span>
+<!-- Missed Deadline Alert Modal -->
+<div id="alert-modal" class="modal-backdrop" style="display: none;">
+  <div class="modal-box" style="border-color: var(--text-red);">
+    <div class="panel-title" style="color: var(--text-red); margin-bottom: 10px;">⚠️ CRITICAL: OVERDUE MILESTONES</div>
+    <div id="alert-content" style="font-size: 11px; color: #f87171; line-height: 1.5; margin-bottom: 16px;"></div>
+    <button class="pixel-btn" style="width: 100%; border-color: var(--text-red); color: var(--text-red);" onclick="closeAlertModal()">ACKNOWLEDGE</button>
+  </div>
+</div>
+
+<!-- Quest Submit Modal -->
+<div id="submit-modal" class="modal-backdrop" style="display: none;">
+  <div class="modal-box">
+    <div class="panel-title" id="submit-modal-title" style="margin-bottom: 12px;">SUBMIT QUEST ARTIFACT</div>
+    <input type="hidden" id="submit-quest-id">
+    <div class="form-group">
+      <label>Repository / Artifact URL</label>
+      <input type="text" id="submit-repo-url" placeholder="https://github.com/...">
     </div>
-    <p style="font-size: 11px; margin-bottom: 10px; color: #cbd5e1;">
-      Root execution cadence: Ngrok tunneling active, OpenCV inference node verified, single-device whitelist enforced.
-    </p>
+    <div class="form-group">
+      <label>Engineering Notes / Proof</label>
+      <textarea id="submit-notes" rows="3" placeholder="Verification steps completed..."></textarea>
+    </div>
     <div style="display: flex; gap: 8px;">
-      <button class="pixel-btn" onclick="executeCreatorCommand('sync-system')">RE-SYNC DAEMON REPOSITORY</button>
-      <button class="pixel-btn" onclick="executeCreatorCommand('purge-sessions')">ROTATE DEVICE KEYS</button>
-      <button class="pixel-btn btn-danger" onclick="executeCreatorCommand('lockdown')">SECURE LOCKDOWN</button>
+      <button class="pixel-btn" style="flex: 1;" onclick="submitQuestForm()">CONFIRM SUBMISSION</button>
+      <button class="pixel-btn btn-danger" onclick="closeSubmitModal()">CANCEL</button>
     </div>
-    <div id="creator-exec-log" style="font-size: 10px; margin-top: 8px; color: var(--xp-blue); font-family: monospace;"></div>
   </div>
+</div>
 
-  <!-- Terminal Access Control Modal (Auth) -->
-  <div id="auth-modal" class="modal-backdrop" style="display: none;">
-    <div class="pixel-box modal-box">
-      <div class="box-title">TERMINAL ACCESS CONTROL</div>
-      <div class="modal-tabs">
-        <button id="tab-btn-login" class="pixel-btn active" onclick="switchAuthTab('login')">LOGIN</button>
-        <button id="tab-btn-register" class="pixel-btn" onclick="switchAuthTab('register')">CREATE ACCOUNT</button>
+<!-- Login / Registration Modal -->
+<div id="auth-modal" class="modal-backdrop" style="display: none; z-index: 1000;">
+  <div class="modal-box" style="border-color: var(--text-gold);">
+    
+    <div style="display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px dashed var(--panel-border); padding-bottom: 8px;">
+      <button id="tab-login-btn" class="pixel-btn" style="flex: 1;" onclick="switchAuthTab('login')">LOGIN</button>
+      <button id="tab-register-btn" class="pixel-btn sem-tab" style="flex: 1;" onclick="switchAuthTab('register')">CREATE ACCOUNT</button>
+    </div>
+
+    <!-- Login Form -->
+    <div id="auth-login-view">
+      <div class="form-group">
+        <label>Callsign / Username</label>
+        <input type="text" id="login-username" placeholder="e.g. ganshyam" autocomplete="username">
       </div>
-      <p id="auth-tab-instruction" style="font-size: 11px; margin-bottom: 12px; color: #94a3b8;">
-        Enter credentials. Creator profile is hardware-locked to 3 authorized devices.
-      </p>
+      <div class="form-group">
+        <label>Passphrase</label>
+        <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter') submitLogin()">
+      </div>
+      <button class="pixel-btn" style="width: 100%; margin-top: 8px;" onclick="submitLogin()">AUTHENTICATE SESSION</button>
+    </div>
 
-      <div id="auth-error" class="error-banner"></div>
-
-      <input type="text" id="auth-username" class="pixel-input" placeholder="Username (e.g. ganshyam or rohit)">
-      <input type="password" id="auth-password" class="pixel-input" placeholder="Password">
-
-      <!-- Pairing Section: Used for Creator device binding -->
-      <div id="pairing-section">
-        <label style="font-size: 10px; color: var(--text-gold); display: block; margin-bottom: 4px;">DEVICE ENROLMENT</label>
-        <select id="auth-device-label" class="pixel-select">
-          <option value="Ubuntu VM">Ubuntu VM</option>
-          <option value="Windows Host PC">Windows Host PC</option>
-          <option value="Mobile Device">Mobile Device</option>
+    <!-- Registration Form (Strict Member-Only) -->
+    <div id="auth-register-view" style="display: none;">
+      <div class="form-group">
+        <label>New Callsign / Handle</label>
+        <input type="text" id="reg-username" placeholder="e.g. suhaas" autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label>Passphrase</label>
+        <input type="password" id="reg-password" placeholder="Minimum 4 characters" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label>Assigned Unit</label>
+        <input type="text" value="GUILD MEMBER" disabled style="opacity: 0.6; cursor: not-allowed; border-color: #334155;">
+      </div>
+      <div class="form-group">
+        <label>Active Semester Cadence</label>
+        <select id="reg-sem">
+          <option value="3">Semester 3</option>
+          <option value="4">Semester 4</option>
+          <option value="5">Semester 5</option>
+          <option value="6">Semester 6</option>
+          <option value="7">Semester 7</option>
         </select>
-        <input type="password" id="auth-master-key" class="pixel-input" placeholder="Master Key (Required for Creator/Enrolment)">
       </div>
-
-      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px;">
-        <button class="pixel-btn" onclick="closeAuthModal()">CANCEL</button>
-        <button id="auth-submit-btn" class="pixel-btn" onclick="submitAuth()">AUTHENTICATE</button>
-      </div>
+      <button class="pixel-btn" style="width: 100%; border-color: var(--text-cyan); color: var(--text-cyan); margin-top: 8px;" onclick="submitRegister()">INITIALIZE MEMBER PROFILE</button>
     </div>
+
   </div>
+</div>
 
-  <!-- Biometric Registration Modal -->
-  <div id="biometric-modal" class="modal-backdrop" style="display: none;">
-    <div class="pixel-box modal-box" style="width: 480px;">
-      <div class="box-title">INITIAL BIOMETRIC REGISTRATION</div>
-      <p style="font-size: 11px; margin-bottom: 8px; color: #94a3b8;">
-        Look into the webcam and keep your face centered to calibrate your profile.
-      </p>
-      <div id="biometric-error" class="error-banner"></div>
-      
-      <video id="biometric-video" autoplay playsinline></video>
-      <canvas id="biometric-canvas" style="display: none;"></canvas>
-
-      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px;">
-        <button class="pixel-btn" onclick="closeBiometricModal()">CLOSE</button>
-        <button class="pixel-btn" onclick="captureReferenceBiometric()">CAPTURE REFERENCE</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Quest Submission Modal -->
-  <div id="quest-modal" class="modal-backdrop" style="display: none;">
-    <div class="pixel-box modal-box" style="width: 480px;">
-      <div class="box-title">
-        <span id="quest-modal-title">SUBMIT QUEST PROOF</span>
-      </div>
-      <p style="font-size: 11px; margin-bottom: 10px; color: #94a3b8;">
-        Provide your repository link, documentation URL, or execution notes for evaluation.
-      </p>
-
-      <div id="quest-submit-error" class="error-banner" style="display: none;"></div>
-
-      <input type="hidden" id="submit-quest-id">
-      
-      <label style="font-size: 10px; color: var(--text-gold); display: block; margin-bottom: 4px;">REPOSITORY / PR / DEMO LINK</label>
-      <input type="text" id="submit-quest-url" class="pixel-input" placeholder="https://github.com/...">
-
-      <label style="font-size: 10px; color: var(--text-gold); display: block; margin-bottom: 4px;">NOTES / IMPLEMENTATION DETAILS</label>
-      <textarea id="submit-quest-notes" class="pixel-input" rows="3" style="resize: vertical; min-height: 60px;" placeholder="Describe modules tested, test runs, or simulation results..."></textarea>
-
-      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px;">
-        <button class="pixel-btn" onclick="closeQuestModal()">CANCEL</button>
-        <button id="quest-submit-btn" class="pixel-btn" onclick="submitQuestProof()">TRANSMIT SUBMISSION</button>
-      </div>
-    </div>
-  </div>
-
-  <script src="/static/app.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
