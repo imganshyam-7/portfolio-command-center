@@ -10,6 +10,11 @@
 
 <div class="container">
 
+  <!-- Uncalibrated Face Warning Banner for Creator -->
+  <div id="bio-warning-banner" class="banner-uncalibrated" style="display: none;" onclick="openCalibrationModal()">
+    ⚠️ CREATOR BIOMETRICS UNENROLLED: CLICK HERE TO CALIBRATE YOUR FACE AND UNLOCK SUBMISSIONS
+  </div>
+
   <!-- Status Bar -->
   <div class="panel status-bar">
     <div>
@@ -17,33 +22,37 @@
       <span id="auth-status-label">INITIALIZING...</span>
     </div>
     <div style="display: flex; gap: 8px;">
-      <button class="pixel-btn" onclick="openBioModal()">BIOMETRIC CALIBRATION</button>
+      <button id="creator-calibrate-btn" class="pixel-btn btn-cyan" style="display: none;" onclick="openCalibrationModal()">⚡ ENROLL CREATOR BIOMETRICS</button>
       <button class="pixel-btn btn-danger" onclick="logout()">LOGOUT</button>
     </div>
   </div>
 
-  <!-- Player Profile -->
+  <!-- Player Profile with Dynamic RPG Level Progress -->
   <div class="panel profile-card">
     <div class="avatar-box">👾</div>
     <div class="profile-details">
       <div class="profile-meta">
-        <span id="profile-name-role">GUEST VISITOR</span>
-        <span id="profile-level" style="color: var(--text-gold);">LVL 01</span>
+        <span id="profile-name-role" style="font-weight: bold; color: var(--text-cyan);">GUEST VISITOR</span>
+        <span id="profile-level" class="profile-level-badge">LVL 01 • 0 / 100 XP (0%)</span>
       </div>
       <div class="progress-bar-bg">
         <div id="profile-xp-bar" class="progress-bar-fill"></div>
       </div>
+      <div class="xp-subtext-bar">
+        <span id="profile-xp-cur">TOTAL ACCUMULATED: 0 XP</span>
+        <span id="profile-xp-next">100 XP NEEDED FOR LVL 02</span>
+      </div>
     </div>
   </div>
 
-  <!-- Main Section -->
+  <!-- Main Grid -->
   <div class="grid-2">
     
     <!-- Quests Column -->
     <div class="panel">
       <div class="panel-header">
-        <span id="quest-log-heading" class="panel-title">SEMESTER 3 ACTIVE QUEST LOG</span>
-        <span id="quest-count" class="badge">0 QUESTS</span>
+        <span id="quest-log-heading" class="panel-title">SEMESTER 3 ACTIVE DIRECTIVES</span>
+        <span id="quest-count" class="badge">0 DIRECTIVES</span>
       </div>
 
       <!-- Semester Navigation -->
@@ -53,6 +62,32 @@
         <button class="pixel-btn sem-tab" onclick="switchSemesterTab(5)">SEM 5</button>
         <button class="pixel-btn sem-tab" onclick="switchSemesterTab(6)">SEM 6</button>
         <button class="pixel-btn sem-tab" onclick="switchSemesterTab(7)">SEM 7</button>
+      </div>
+
+      <!-- Featured Big Box: Current Active Directive Spotlight -->
+      <div id="active-directive-box" class="active-quest-spotlight" style="display: none;">
+        <div class="spotlight-header">
+          <div>
+            <span class="badge" style="border-color: var(--text-cyan); color: var(--text-cyan); margin-bottom: 4px;">CURRENT OBJECTIVE TARGET</span>
+            <div id="spotlight-title" class="spotlight-title">LOADING DIRECTIVE...</div>
+          </div>
+          <span id="spotlight-badge" class="badge badge-boss">PENDING</span>
+        </div>
+        <div class="spotlight-meta">
+          <span id="spotlight-deadline" style="color: var(--text-gold);">DEADLINE: PENDING</span> • 
+          <span id="spotlight-xp" style="color: var(--text-green);">+100 XP</span> • 
+          <span id="spotlight-stack" style="color: var(--text-purple);">STACK: STANDARD</span>
+        </div>
+        <div id="spotlight-desc" class="spotlight-desc">Detailed engineering directive will load here.</div>
+        <div class="spotlight-actions">
+          <button id="spotlight-copy-btn" class="pixel-btn btn-cyan" onclick="copyActiveMasterPrompt()">🤖 COPY AI MASTER PROMPT</button>
+          <button id="spotlight-submit-btn" class="pixel-btn" onclick="openActiveQuestModal()">🚀 SUBMIT ARTIFACT</button>
+        </div>
+      </div>
+
+      <!-- Locked Semester Warning -->
+      <div id="locked-sem-msg" class="locked-sem-banner" style="display: none;">
+        🔒 SEMESTER LOCKED: Complete and verify all milestones in the preceding semester to level up and unlock this cadence.
       </div>
 
       <div id="quest-list-container" class="quest-list">
@@ -94,7 +129,7 @@
 
 </div>
 
-<!-- Missed Deadline Alert Modal -->
+<!-- Deadline Alert Modal -->
 <div id="alert-modal" class="modal-backdrop" style="display: none;">
   <div class="modal-box" style="border-color: var(--text-red);">
     <div class="panel-title" style="color: var(--text-red); margin-bottom: 10px;">⚠️ CRITICAL: OVERDUE MILESTONES</div>
@@ -103,36 +138,69 @@
   </div>
 </div>
 
-<!-- Quest Submit Modal -->
+<!-- Quest Submit Modal (Internal Verification + Anti-Proxy Scan) -->
 <div id="submit-modal" class="modal-backdrop" style="display: none;">
-  <div class="modal-box">
-    <div class="panel-title" id="submit-modal-title" style="margin-bottom: 12px;">SUBMIT QUEST ARTIFACT</div>
+  <div class="modal-box" style="width: 440px;">
+    <div class="panel-title" id="submit-modal-title" style="margin-bottom: 8px;">SUBMIT QUEST ARTIFACT</div>
     <input type="hidden" id="submit-quest-id">
+
     <div class="form-group">
-      <label>Repository / Artifact URL</label>
-      <input type="text" id="submit-repo-url" placeholder="https://github.com/...">
+      <label>Artifact / Git Repository Link</label>
+      <input type="text" id="submit-repo-url" placeholder="https://github.com/ganshyam/repo-name">
     </div>
+
+    <!-- Live Anti-Proxy Face Scan -->
     <div class="form-group">
-      <label>Engineering Notes / Proof</label>
-      <textarea id="submit-notes" rows="3" placeholder="Verification steps completed..."></textarea>
+      <label style="color: var(--text-cyan);">Biometric Identity Match (Anti-Proxy Scan)</label>
+      <div class="camera-container">
+        <video id="submit-camera" class="camera-video" autoplay playsinline muted></video>
+        <div class="reticle-overlay">
+          <div class="reticle-scanline"></div>
+        </div>
+      </div>
+      <div id="submit-bio-status" class="bio-status-badge">ALIGN FACE WITH SENSOR • SYSTEM AUTOMATICALLY VERIFIES OPERATOR</div>
     </div>
-    <div style="display: flex; gap: 8px;">
-      <button class="pixel-btn" style="flex: 1;" onclick="submitQuestForm()">CONFIRM SUBMISSION</button>
+
+    <div style="display: flex; gap: 8px; margin-top: 10px;">
+      <button id="submit-confirm-btn" class="pixel-btn" style="flex: 1;" onclick="submitQuestForm()">AUTHENTICATE & VERIFY</button>
       <button class="pixel-btn btn-danger" onclick="closeSubmitModal()">CANCEL</button>
     </div>
   </div>
 </div>
 
-<!-- Login / Registration Modal -->
+<!-- Creator Calibration Modal -->
+<div id="calibration-modal" class="modal-backdrop" style="display: none;">
+  <div class="modal-box" style="border-color: var(--text-cyan); width: 420px;">
+    <div class="panel-title" style="color: var(--text-cyan); margin-bottom: 10px;">CREATOR BIOMETRIC ENROLLMENT</div>
+    <p style="font-size: 11px; color: #94a3b8; margin-bottom: 8px; line-height: 1.4;">
+      Look directly into the camera in a well-lit area. Your 128-dimensional facial embedding will be permanently enrolled to authorize quest submissions.
+    </p>
+
+    <div class="camera-container">
+      <video id="calibration-camera" class="camera-video" autoplay playsinline muted></video>
+      <div class="reticle-overlay">
+        <div class="reticle-scanline"></div>
+      </div>
+    </div>
+    <div id="cal-status-text" class="bio-status-badge">POSITION FACE INSIDE CYAN RETICLE</div>
+
+    <div style="display: flex; gap: 8px; margin-top: 14px;">
+      <button id="cal-save-btn" class="pixel-btn btn-cyan" style="flex: 1;" onclick="executeCalibration()">ENROLL MASTER FACE</button>
+      <button class="pixel-btn btn-danger" onclick="closeCalibrationModal()">CANCEL</button>
+    </div>
+  </div>
+</div>
+
+<!-- Auth Modal -->
 <div id="auth-modal" class="modal-backdrop" style="display: none; z-index: 1000;">
-  <div class="modal-box" style="border-color: var(--text-gold);">
+  <div class="modal-box" style="border-color: var(--text-gold); width: 440px;">
     
-    <div style="display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px dashed var(--panel-border); padding-bottom: 8px;">
+    <div style="display: flex; gap: 8px; margin-bottom: 14px; border-bottom: 1px dashed var(--panel-border); padding-bottom: 8px;">
       <button id="tab-login-btn" class="pixel-btn" style="flex: 1;" onclick="switchAuthTab('login')">LOGIN</button>
       <button id="tab-register-btn" class="pixel-btn sem-tab" style="flex: 1;" onclick="switchAuthTab('register')">CREATE ACCOUNT</button>
     </div>
 
-    <!-- Login Form -->
+    <!-- Login -->
     <div id="auth-login-view">
       <div class="form-group">
         <label>Callsign / Username</label>
@@ -145,7 +213,7 @@
       <button class="pixel-btn" style="width: 100%; margin-top: 8px;" onclick="submitLogin()">AUTHENTICATE SESSION</button>
     </div>
 
-    <!-- Registration Form (Strict Member-Only) -->
+    <!-- Registration with Permanent Face Enrollment -->
     <div id="auth-register-view" style="display: none;">
       <div class="form-group">
         <label>New Callsign / Handle</label>
@@ -159,19 +227,36 @@
         <label>Assigned Unit</label>
         <input type="text" value="GUILD MEMBER" disabled style="opacity: 0.6; cursor: not-allowed; border-color: #334155;">
       </div>
+
       <div class="form-group">
-        <label>Active Semester Cadence</label>
-        <select id="reg-sem">
-          <option value="3">Semester 3</option>
-          <option value="4">Semester 4</option>
-          <option value="5">Semester 5</option>
-          <option value="6">Semester 6</option>
-          <option value="7">Semester 7</option>
-        </select>
+        <label style="color: var(--text-cyan);">Facial Calibration (Anti-Proxy Lock)</label>
+        <div class="camera-container">
+          <video id="reg-camera" class="camera-video" autoplay playsinline muted></video>
+          <div class="reticle-overlay">
+            <div class="reticle-scanline"></div>
+          </div>
+        </div>
+        <div class="bio-status-badge">LOOK AT CAMERA • ENROLLS BIOMETRICS</div>
       </div>
-      <button class="pixel-btn" style="width: 100%; border-color: var(--text-cyan); color: var(--text-cyan); margin-top: 8px;" onclick="submitRegister()">INITIALIZE MEMBER PROFILE</button>
+
+      <button class="pixel-btn btn-cyan" style="width: 100%; margin-top: 8px;" onclick="submitRegister()">ENROLL & CREATE PROFILE</button>
     </div>
 
+  </div>
+</div>
+
+<!-- Flashy 50 XP Registration Welcome Celebration -->
+<div id="bonus-modal" class="bonus-overlay" style="display: none;">
+  <div class="bonus-card">
+    <div class="bonus-laser-banner">⚡ AGENT ACTIVATION COMPLETED ⚡</div>
+    <div style="font-size: 16px; font-weight: bold; color: #fff;">WELCOME TO GUILD VASAVI</div>
+    <div class="bonus-xp-glow">+50 XP</div>
+    <div class="bonus-subtext">
+      Cadet profile verified. Your biometric encoding has been registered and a <strong>+50 XP Welcome Grant</strong> has been credited to your active progression bar.
+    </div>
+    <button class="pixel-btn btn-cyan" style="width: 100%; padding: 10px; font-size: 12px;" onclick="claimBonusAndEnter()">
+      ⚔️ INITIALIZE COMMAND DESK
+    </button>
   </div>
 </div>
 

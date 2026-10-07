@@ -1,11 +1,4 @@
 venv/
 __pycache__/
 *.pyc
-.env
-cloudflared.deb
-*.db
-*.db-wal
-*.db-shm
-venv/
-__pycache__/
-*.pyc
+data/models/*.onnx

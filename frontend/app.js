@@ -1,9 +1,56 @@
 let currentUser = null;
-let selectedSemester = null;
+let selectedSemester = 3;
 let activePeerId = null;
+let currentSpotlightQuest = null;
+let activeQuestsCatalog = [];
+let pendingWelcomeUser = null;
+
+let activeStreams = {};
+
+async function startCamera(videoElementId) {
+  try {
+    if (activeStreams[videoElementId]) {
+      stopCamera(videoElementId);
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 320, height: 240, facingMode: 'user' }
+    });
+    const videoEl = document.getElementById(videoElementId);
+    if (videoEl) {
+      videoEl.srcObject = stream;
+      activeStreams[videoElementId] = stream;
+      await videoEl.play().catch(() => {});
+    }
+  } catch (err) {
+    console.error("Camera access error:", err);
+    alert("Camera permission denied. Facial verification requires active webcam access.");
+  }
+}
+
+function stopCamera(videoElementId) {
+  if (activeStreams[videoElementId]) {
+    activeStreams[videoElementId].getTracks().forEach(track => track.stop());
+    delete activeStreams[videoElementId];
+  }
+  const videoEl = document.getElementById(videoElementId);
+  if (videoEl) videoEl.srcObject = null;
+}
+
+function captureFrame(videoElementId) {
+  const video = document.getElementById(videoElementId);
+  if (!video || !video.videoWidth || video.videoWidth === 0) {
+    throw new Error("Camera feed initializing. Please wait a moment and face the sensor directly.");
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', 0.85);
+}
 
 // ==========================================
-// API Fetch Wrapper
+// API Helper
 // ==========================================
 async function apiFetch(endpoint, options = {}) {
   const token = localStorage.getItem('auth_token') || '';
@@ -24,21 +71,43 @@ async function apiFetch(endpoint, options = {}) {
 function escapeHtml(str) {
   if (!str) return '';
   return str.replace(/[&<>'"]/g, tag => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    "'": '&#39;',
-    '"': '&quot;'
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
   }[tag] || tag));
 }
 
 // ==========================================
-// Initialization
+// Dynamic RPG Level Scaling
+// Level L -> L+1 requires (L * 100) XP
+// ==========================================
+function getRpgStats(totalXp) {
+  let xp = Math.max(0, parseInt(totalXp, 10) || 0);
+  let level = 1;
+  let accumulated = 0;
+
+  while (true) {
+    const requiredForCurrentLevel = level * 100;
+    if (xp < accumulated + requiredForCurrentLevel) {
+      const xpInLevel = xp - accumulated;
+      const progressPercent = Math.min(100, Math.max(0, Math.round((xpInLevel / requiredForCurrentLevel) * 100)));
+      return {
+        level,
+        totalXp: xp,
+        xpInLevel,
+        requiredForCurrentLevel,
+        progressPercent,
+        xpRemaining: requiredForCurrentLevel - xpInLevel
+      };
+    }
+    accumulated += requiredForCurrentLevel;
+    level++;
+  }
+}
+
+// ==========================================
+// Lifecycle & Auth
 // ==========================================
 document.addEventListener('DOMContentLoaded', async () => {
   const storedUser = localStorage.getItem('auth_token');
-  
-  // Load public quest catalogue & matrix immediately so page is never blank
   await loadQuests();
   await loadGuildMatrix();
 
@@ -51,9 +120,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function initSession(username) {
-  currentUser = { username: username, role: username.toLowerCase() === 'ganshyam' ? 'creator' : 'member' };
+  const isCreator = username.toLowerCase() === 'ganshyam';
+  currentUser = { username: username, role: isCreator ? 'creator' : 'member' };
+  
   document.getElementById('auth-status-label').innerText = `ACTIVE: ${username.toUpperCase()} [${currentUser.role.toUpperCase()}]`;
   document.getElementById('profile-name-role').innerText = `${username.toUpperCase()} [${currentUser.role.toUpperCase()}]`;
+
+  const calBtn = document.getElementById('creator-calibrate-btn');
+  if (calBtn) calBtn.style.display = isCreator ? 'inline-block' : 'none';
+
+  await checkBiometricStatus();
 
   await Promise.all([
     loadQuests(),
@@ -63,14 +139,28 @@ async function initSession(username) {
   ]);
 }
 
+async function checkBiometricStatus() {
+  if (!currentUser || currentUser.role !== 'creator') return;
+  try {
+    const res = await apiFetch('/api/users');
+    if (!res.ok) return;
+    const users = await res.json();
+    const me = users.find(u => u.username.toLowerCase() === currentUser.username.toLowerCase());
+    
+    const banner = document.getElementById('bio-warning-banner');
+    if (me && !me.has_bio) {
+      banner.style.display = 'block';
+    } else {
+      banner.style.display = 'none';
+    }
+  } catch (err) {}
+}
+
 function logout() {
   localStorage.removeItem('auth_token');
   location.reload();
 }
 
-// ==========================================
-// Auth Handlers (Enforced Member Only)
-// ==========================================
 function switchAuthTab(tab) {
   const loginView = document.getElementById('auth-login-view');
   const regView = document.getElementById('auth-register-view');
@@ -78,6 +168,7 @@ function switchAuthTab(tab) {
   const regBtn = document.getElementById('tab-register-btn');
 
   if (tab === 'login') {
+    stopCamera('reg-camera');
     loginView.style.display = 'block';
     regView.style.display = 'none';
     loginBtn.className = 'pixel-btn';
@@ -87,13 +178,13 @@ function switchAuthTab(tab) {
     regView.style.display = 'block';
     regBtn.className = 'pixel-btn';
     loginBtn.className = 'pixel-btn sem-tab';
+    startCamera('reg-camera');
   }
 }
 
 async function submitLogin() {
   const username = document.getElementById('login-username').value.trim();
   const password = document.getElementById('login-password').value;
-
   if (!username || !password) return alert('Enter callsign and passphrase.');
 
   try {
@@ -108,6 +199,10 @@ async function submitLogin() {
     localStorage.setItem('auth_token', data.user.username);
     document.getElementById('auth-modal').style.display = 'none';
     await initSession(data.user.username);
+
+    if (!data.user.has_biometrics && data.user.role === 'creator') {
+      openCalibrationModal();
+    }
   } catch (err) {
     alert(err.message);
   }
@@ -116,31 +211,52 @@ async function submitLogin() {
 async function submitRegister() {
   const username = document.getElementById('reg-username').value.trim();
   const password = document.getElementById('reg-password').value;
-  const sem = parseInt(document.getElementById('reg-sem').value, 10);
 
   if (!username) return alert('Enter a callsign.');
   if (password.length < 4) return alert('Passphrase must be at least 4 characters.');
+
+  let faceImage = "";
+  try {
+    faceImage = captureFrame('reg-camera');
+  } catch (err) {
+    return alert(err.message);
+  }
 
   try {
     const res = await fetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, current_semester: sem })
+      body: JSON.stringify({ username, password, biometric_image: faceImage })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Registration failed');
 
-    alert(`Unit initialized for ${data.user.username}. Logged in.`);
-    localStorage.setItem('auth_token', data.user.username);
+    stopCamera('reg-camera');
     document.getElementById('auth-modal').style.display = 'none';
-    await initSession(data.user.username);
+    showRegistrationCelebration(data.user.username);
   } catch (err) {
     alert(err.message);
   }
 }
 
+function showRegistrationCelebration(username) {
+  pendingWelcomeUser = username;
+  const modal = document.getElementById('bonus-modal');
+  if (modal) modal.style.display = 'flex';
+}
+
+async function claimBonusAndEnter() {
+  const modal = document.getElementById('bonus-modal');
+  if (modal) modal.style.display = 'none';
+  if (pendingWelcomeUser) {
+    localStorage.setItem('auth_token', pendingWelcomeUser);
+    await initSession(pendingWelcomeUser);
+    pendingWelcomeUser = null;
+  }
+}
+
 // ==========================================
-// Quest Log & Hackerrank Locks
+// Quests & Spotlight Directive
 // ==========================================
 function switchSemesterTab(sem) {
   selectedSemester = sem;
@@ -149,82 +265,68 @@ function switchSemesterTab(sem) {
 
 async function loadQuests() {
   try {
-    const url = selectedSemester ? `/api/quests?semester=${selectedSemester}` : '/api/quests';
-    const res = await apiFetch(url);
+    const res = await apiFetch(`/api/quests?semester=${selectedSemester}`);
     if (!res.ok) return;
     const data = await res.json();
 
-    const activeSem = data.current_active_semester || 3;
-    selectedSemester = data.selected_semester || activeSem;
-    const quests = data.quests || [];
+    const isLocked = data.semester_locked;
+    activeQuestsCatalog = data.quests || [];
+    currentSpotlightQuest = data.active_quest;
 
-    document.getElementById('quest-log-heading').innerText = 
-      `SEMESTER ${selectedSemester} QUEST LOG ${selectedSemester === activeSem ? '[CURRENT CADENCE]' : ''}`;
-
+    document.getElementById('quest-log-heading').innerText = `SEMESTER ${selectedSemester} ACTIVE DIRECTIVES`;
     document.querySelectorAll('.sem-tab').forEach(btn => {
       btn.classList.toggle('active', btn.innerText === `SEM ${selectedSemester}`);
     });
 
-    const listContainer = document.getElementById('quest-list-container');
-    listContainer.innerHTML = '';
-    document.getElementById('quest-count').innerText = `${quests.length} QUESTS`;
+    document.getElementById('locked-sem-msg').style.display = isLocked ? 'block' : 'none';
 
-    if (quests.length === 0) {
-      listContainer.innerHTML = `<div style="padding: 12px; color: #64748b; font-size: 11px;">No milestones assigned for Semester ${selectedSemester}.</div>`;
-      return;
+    // Spotlight Box
+    const spotlightBox = document.getElementById('active-directive-box');
+    if (!isLocked && currentSpotlightQuest) {
+      spotlightBox.style.display = 'block';
+      document.getElementById('spotlight-title').innerText = `${currentSpotlightQuest.code}: ${currentSpotlightQuest.title}`;
+      document.getElementById('spotlight-desc').innerText = currentSpotlightQuest.description;
+      document.getElementById('spotlight-stack').innerText = `STACK: ${currentSpotlightQuest.tech_stack || 'Standard'}`;
+      document.getElementById('spotlight-xp').innerText = `+${currentSpotlightQuest.xp_reward || 100} XP`;
+      
+      let dateText = `DEADLINE: ${currentSpotlightQuest.end_date || 'TBD'}`;
+      if (currentSpotlightQuest.days_remaining !== undefined) {
+        if (currentSpotlightQuest.days_remaining < 0) dateText = `OVERDUE BY ${Math.abs(currentSpotlightQuest.days_remaining)} DAYS`;
+        else if (currentSpotlightQuest.days_remaining <= 3) dateText = `DUE IN ${currentSpotlightQuest.days_remaining} DAYS`;
+      }
+      document.getElementById('spotlight-deadline').innerText = dateText;
+    } else {
+      spotlightBox.style.display = 'none';
     }
 
-    quests.forEach(q => {
+    const listContainer = document.getElementById('quest-list-container');
+    listContainer.innerHTML = '';
+    document.getElementById('quest-count').innerText = `${activeQuestsCatalog.length} DIRECTIVES`;
+
+    activeQuestsCatalog.forEach(q => {
       const isDone = q.status === 'COMPLETED' || q.status === 'SUBMITTED';
-      const isLocked = q.status === 'LOCKED';
-
-      let dateColor = '#cbd5e1';
-      let dateText = `${q.start_date || 'TBD'} → ${q.end_date || 'TBD'}`;
-      if (!isDone && !isLocked && q.days_remaining !== undefined) {
-        if (q.days_remaining < 0) {
-          dateColor = 'var(--text-red)';
-          dateText = `OVERDUE BY ${Math.abs(q.days_remaining)} DAYS`;
-        } else if (q.days_remaining <= 3) {
-          dateColor = 'var(--text-red)';
-          dateText = `DUE IN ${q.days_remaining} DAYS`;
-        }
-      }
-
-      const aiPrompt = `Act as an expert software engineering mentor. I am working on an engineering quest titled '${q.title}'. The tech stack involves: ${q.tech_stack || 'General Engineering'}. Here is the brief: ${q.description}. Please break this down into actionable implementation steps and guide me on where to start.`;
+      const isQuesLocked = q.status === 'LOCKED';
 
       const questEl = document.createElement('div');
-      questEl.className = `quest-item ${isLocked ? 'locked' : ''}`;
+      questEl.className = `quest-item ${isQuesLocked ? 'locked' : ''}`;
 
       questEl.innerHTML = `
-        <div class="quest-header-row" onclick="${isLocked ? '' : `toggleDetails(${q.id})`}">
-          <div style="max-width: 68%;">
-            <div style="margin-bottom: 2px;">
-              ${q.tier === 'major' ? '<span class="badge badge-boss">MAJOR BOSS</span>' : ''}
-              <strong style="color: var(--text-gold); font-size: 11px;">${q.code}:</strong> 
-              <span style="font-weight: 600;">${q.title}</span>
-            </div>
-            <div style="font-size: 10px; margin-top: 3px;">
-              <span style="color: ${dateColor}; font-weight: ${q.days_remaining <= 3 && !isDone && !isLocked ? 'bold' : 'normal'}">${dateText}</span> • 
-              <span style="color: var(--text-cyan);">+${q.xp_reward || 100} XP</span>
+        <div class="quest-header-row">
+          <div style="max-width: 75%;">
+            <span style="font-weight: bold; color: var(--text-gold); font-size: 11px;">${q.code}:</span>
+            <span style="font-weight: 600;">${q.title}</span>
+            <div style="font-size: 10px; color: #64748b; margin-top: 2px;">
+              [${q.start_date || 'TBD'} → ${q.end_date || 'TBD'}] • <span style="color: var(--text-cyan);">+${q.xp_reward || 100} XP</span>
             </div>
           </div>
-
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <span class="badge ${isDone ? 'badge-done' : (isLocked ? 'badge-locked' : '')}">${q.status}</span>
-            <button class="pixel-btn" style="padding: 2px 8px; font-size: 10px;" 
-                    onclick="event.stopPropagation(); openQuestModal(${q.id}, '${escapeHtml(q.title)}')"
-                    ${isLocked ? 'disabled' : ''}>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <span class="badge ${isDone ? 'badge-done' : (isQuesLocked ? 'badge-locked' : '')}">${q.status}</span>
+            <button class="pixel-btn" style="padding: 3px 8px; font-size: 10px;" 
+                    onclick="openQuestModalById(${q.id})"
+                    ${isQuesLocked ? 'disabled' : ''}>
               ${isDone ? 'RESUBMIT' : 'SUBMIT'}
             </button>
           </div>
-        </div>
-
-        <div id="details-${q.id}" class="quest-details-pane">
-          <div style="color: var(--text-cyan); margin-bottom: 4px;"><strong>TECH STACK / SKILLS:</strong> ${q.tech_stack || 'Standard Stack'}</div>
-          <div style="color: #94a3b8; margin-bottom: 10px; line-height: 1.4;"><strong>BRIEF:</strong> ${q.description || 'No description provided.'}</div>
-          <button class="pixel-btn" onclick="copyAiPrompt('${escapeHtml(aiPrompt)}', event)">
-            🤖 COPY AI MENTOR PROMPT
-          </button>
         </div>
       `;
       listContainer.appendChild(questEl);
@@ -234,46 +336,86 @@ async function loadQuests() {
   }
 }
 
-function toggleDetails(id) {
-  const el = document.getElementById(`details-${id}`);
-  if (el) el.style.display = el.style.display === 'block' ? 'none' : 'block';
-}
+function copyActiveMasterPrompt() {
+  if (!currentSpotlightQuest) return;
+  const q = currentSpotlightQuest;
+  const masterPrompt = `Act as an expert senior staff engineer and ECE mentor. I am implementing the following technical milestone:
 
-function copyAiPrompt(promptText, ev) {
-  if (ev) ev.stopPropagation();
-  navigator.clipboard.writeText(promptText).then(() => {
-    alert('AI Mentor prompt copied to clipboard!');
+Title: ${q.title} (${q.code})
+Semester: Semester ${q.semester}
+Tech Stack / Tools: ${q.tech_stack || 'Standard Embedded/Software Stack'}
+Milestone Directive:
+${q.description}
+
+Deadline Window: ${q.start_date || 'N/A'} through ${q.end_date || 'N/A'}
+
+Provide a comprehensive, high-tier technical breakdown:
+1. Architectural design decisions, protocols, and interface diagrams.
+2. Step-by-step implementation roadmap with core algorithms and starter code.
+3. Common bugs, edge-cases, and timing pitfalls.
+4. Concrete test verification procedures to guarantee production stability.`;
+
+  navigator.clipboard.writeText(masterPrompt).then(() => {
+    alert("🤖 AI Master Prompt copied to clipboard!");
   });
 }
 
-function openQuestModal(id, title) {
+function openActiveQuestModal() {
+  if (!currentSpotlightQuest) return;
+  openQuestModalById(currentSpotlightQuest.id);
+}
+
+function openQuestModalById(id) {
   if (!localStorage.getItem('auth_token')) {
     document.getElementById('auth-modal').style.display = 'flex';
     return;
   }
+  const quest = activeQuestsCatalog.find(q => q.id === id) || currentSpotlightQuest;
+  const title = quest ? quest.title : `Directive #${id}`;
+
   document.getElementById('submit-quest-id').value = id;
   document.getElementById('submit-modal-title').innerText = `SUBMIT: ${title}`;
   document.getElementById('submit-repo-url').value = '';
-  document.getElementById('submit-notes').value = '';
+  document.getElementById('submit-confirm-btn').disabled = false;
+  document.getElementById('submit-confirm-btn').innerText = 'AUTHENTICATE & VERIFY';
   document.getElementById('submit-modal').style.display = 'flex';
+  
+  startCamera('submit-camera');
 }
 
 function closeSubmitModal() {
+  stopCamera('submit-camera');
   document.getElementById('submit-modal').style.display = 'none';
 }
 
 async function submitQuestForm() {
   const questId = parseInt(document.getElementById('submit-quest-id').value, 10);
-  const repoUrl = document.getElementById('submit-repo-url').value;
-  const notes = document.getElementById('submit-notes').value;
+  const repoUrl = document.getElementById('submit-repo-url').value.trim();
+  const btn = document.getElementById('submit-confirm-btn');
+
+  if (!repoUrl) return alert('Enter a valid repository or artifact URL.');
+
+  let snapshot = "";
+  try {
+    snapshot = captureFrame('submit-camera');
+  } catch (err) {
+    return alert(err.message);
+  }
+
+  btn.disabled = true;
+  btn.innerText = 'SCANNING & VERIFYING...';
 
   try {
     const res = await apiFetch('/api/quests/submit', {
       method: 'POST',
-      body: JSON.stringify({ quest_id: questId, submission_url: repoUrl, notes: notes })
+      body: JSON.stringify({
+        quest_id: questId,
+        submission_url: repoUrl,
+        biometric_snapshot: snapshot
+      })
     });
     const result = await res.json();
-    if (!res.ok) throw new Error(result.detail || 'Submission failed');
+    if (!res.ok) throw new Error(result.detail || 'Submission rejected');
 
     alert(result.message);
     closeSubmitModal();
@@ -281,11 +423,14 @@ async function submitQuestForm() {
     await loadGuildMatrix();
   } catch (err) {
     alert(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerText = 'AUTHENTICATE & VERIFY';
   }
 }
 
 // ==========================================
-// Guild VASAVI Roster
+// Guild Matrix & RPG Level Sync
 // ==========================================
 async function loadGuildMatrix() {
   try {
@@ -295,34 +440,82 @@ async function loadGuildMatrix() {
     const container = document.getElementById('guild-roster-container');
     container.innerHTML = '';
 
-    if (team.length === 0) {
-      container.innerHTML = `<div style="color: #64748b; font-size: 11px;">No registered guild members.</div>`;
-      return;
-    }
-
     team.forEach((member, index) => {
       const isHead = index === 0;
+      const stats = getRpgStats(member.xp || 0);
       const row = document.createElement('div');
       row.className = `guild-row ${isHead ? 'guild-head-anim' : ''}`;
 
       row.innerHTML = `
-        <div>
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; max-width: 65%;">
           <strong style="color: ${isHead ? 'var(--text-gold)' : 'inherit'};">${member.username.toUpperCase()}</strong> 
           <span style="font-size: 10px; color: #64748b;">[${member.role.toUpperCase()}]</span>
+          ${isHead ? '<span class="guild-head-badge">👑 GUILD HEAD</span>' : ''}
         </div>
-        ${isHead ? '<span class="guild-head-tag">👑 GUILD HEAD</span>' : ''}
-        <span class="badge badge-done">XP: ${member.xp || 0}</span>
+        <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
+          <span class="badge" style="border-color: var(--text-cyan); color: var(--text-cyan);">LVL ${String(stats.level).padStart(2, '0')}</span>
+          <span class="badge badge-done">${stats.totalXp} XP</span>
+        </div>
       `;
       container.appendChild(row);
 
+      // Active user level & progress bar sync
       if (currentUser && member.username.toLowerCase() === currentUser.username.toLowerCase()) {
-        const xp = member.xp || 0;
-        document.getElementById('profile-level').innerText = `LVL ${Math.max(1, Math.floor(xp / 100))}`;
-        document.getElementById('profile-xp-bar').style.width = `${Math.min(100, (xp % 100))}%`;
+        document.getElementById('profile-level').innerText = 
+          `LVL ${String(stats.level).padStart(2, '0')} • ${stats.xpInLevel} / ${stats.requiredForCurrentLevel} XP (${stats.progressPercent}%)`;
+        document.getElementById('profile-xp-bar').style.width = `${stats.progressPercent}%`;
+        document.getElementById('profile-xp-cur').innerText = `TOTAL ACCUMULATED: ${stats.totalXp} XP`;
+        document.getElementById('profile-xp-next').innerText = `${stats.xpRemaining} XP NEEDED FOR LVL ${String(stats.level + 1).padStart(2, '0')}`;
       }
     });
   } catch (err) {
     console.error('Failed to load Guild matrix:', err);
+  }
+}
+
+// ==========================================
+// Creator Biometric Enrollment Modal
+// ==========================================
+function openCalibrationModal() {
+  document.getElementById('calibration-modal').style.display = 'flex';
+  document.getElementById('cal-save-btn').disabled = false;
+  document.getElementById('cal-save-btn').innerText = 'ENROLL MASTER FACE';
+  startCamera('calibration-camera');
+}
+
+function closeCalibrationModal() {
+  stopCamera('calibration-camera');
+  document.getElementById('calibration-modal').style.display = 'none';
+}
+
+async function executeCalibration() {
+  const btn = document.getElementById('cal-save-btn');
+  let faceImage = "";
+  try {
+    faceImage = captureFrame('calibration-camera');
+  } catch (err) {
+    return alert(err.message);
+  }
+
+  btn.disabled = true;
+  btn.innerText = 'EXTRACTING 128-D EMBEDDINGS...';
+
+  try {
+    const res = await apiFetch('/api/bio/calibrate', {
+      method: 'POST',
+      body: JSON.stringify({ biometric_image: faceImage })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Calibration failed');
+
+    alert(data.message);
+    document.getElementById('bio-warning-banner').style.display = 'none';
+    closeCalibrationModal();
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerText = 'ENROLL MASTER FACE';
   }
 }
 
@@ -356,11 +549,6 @@ async function loadPeers() {
     container.innerHTML = '';
 
     const peers = users.filter(u => !currentUser || u.username.toLowerCase() !== currentUser.username.toLowerCase());
-    if (peers.length === 0) {
-      container.innerHTML = `<div style="color: #64748b; font-size: 10px; padding: 6px;">No external peers.</div>`;
-      return;
-    }
-
     peers.forEach(peer => {
       const card = document.createElement('div');
       card.className = `peer-card ${activePeerId === peer.id ? 'active' : ''}`;
@@ -388,11 +576,6 @@ async function loadTransmissions() {
     const msgs = await res.json();
     const log = document.getElementById('transmission-log');
     log.innerHTML = '';
-
-    if (msgs.length === 0) {
-      log.innerHTML = `<div style="color: #64748b; margin: auto;">No transmissions exchanged yet.</div>`;
-      return;
-    }
 
     msgs.forEach(m => {
       const row = document.createElement('div');
@@ -433,8 +616,4 @@ async function sendTransmission() {
   } catch (err) {
     console.error('Error sending message:', err);
   }
-}
-
-function openBioModal() {
-  alert('Biometric scanner calibrated.');
 }

@@ -81,6 +81,16 @@ body {
   color: #000;
 }
 
+.pixel-btn.btn-cyan {
+  border-color: var(--text-cyan);
+  color: var(--text-cyan);
+}
+
+.pixel-btn.btn-cyan:hover {
+  background: var(--text-cyan);
+  color: #000;
+}
+
 .pixel-btn.btn-danger {
   border-color: var(--text-red);
   color: var(--text-red);
@@ -110,49 +120,60 @@ body {
   background: transparent !important;
 }
 
+/* Responsive Profile Card & Level Scaling */
 .profile-card {
   display: flex;
   align-items: center;
   gap: 16px;
-}
-
-.avatar-box {
-  width: 48px;
-  height: 48px;
-  border: 1px solid var(--text-purple);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-  background: rgba(192, 132, 252, 0.1);
+  padding: 14px;
 }
 
 .profile-details {
   flex-grow: 1;
+  min-width: 0;
 }
 
 .profile-meta {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   margin-bottom: 6px;
   font-weight: bold;
+  gap: 12px;
+}
+
+.profile-level-badge {
+  color: var(--text-gold);
+  font-size: 11px;
+  white-space: nowrap;
+  text-align: right;
+  letter-spacing: 0.5px;
 }
 
 .progress-bar-bg {
   width: 100%;
-  height: 10px;
+  height: 12px;
   background: #030712;
   border: 1px solid #1e293b;
   border-radius: 2px;
   overflow: hidden;
+  position: relative;
 }
 
 .progress-bar-fill {
   height: 100%;
-  background: var(--text-green);
-  box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+  background: linear-gradient(90deg, #16a34a 0%, #22c55e 100%);
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.4);
   width: 0%;
-  transition: width 0.4s ease;
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.xp-subtext-bar {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: #64748b;
+  margin-top: 5px;
 }
 
 .grid-2 {
@@ -167,26 +188,70 @@ body {
   }
 }
 
+/* Featured Active Directive Spotlight */
+.active-quest-spotlight {
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.08) 0%, rgba(13, 18, 36, 0.95) 100%);
+  border: 1px solid var(--text-cyan);
+  border-radius: 4px;
+  padding: 14px;
+  margin-bottom: 14px;
+  box-shadow: 0 0 15px rgba(56, 189, 248, 0.15);
+}
+
+.spotlight-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.spotlight-title {
+  color: var(--text-gold);
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.spotlight-desc {
+  font-size: 11px;
+  color: #cbd5e1;
+  line-height: 1.5;
+  margin: 8px 0;
+  background: rgba(3, 7, 18, 0.5);
+  padding: 8px;
+  border-left: 2px solid var(--text-cyan);
+}
+
+.spotlight-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 10px;
+  margin-bottom: 10px;
+}
+
+.spotlight-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* Quest List */
 .quest-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-height: 460px;
+  gap: 8px;
+  max-height: 420px;
   overflow-y: auto;
 }
 
 .quest-item {
   border: 1px solid var(--panel-border);
-  padding: 10px;
+  padding: 8px 10px;
   background: rgba(15, 23, 42, 0.4);
   display: flex;
   flex-direction: column;
   gap: 6px;
-  transition: border-color 0.2s ease;
-}
-
-.quest-item:hover:not(.locked) {
-  border-color: #334155;
 }
 
 .quest-item.locked {
@@ -199,7 +264,6 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  cursor: pointer;
 }
 
 .badge {
@@ -230,15 +294,17 @@ body {
   background: rgba(239, 68, 68, 0.1);
 }
 
-.quest-details-pane {
-  background: rgba(2, 6, 23, 0.8);
-  border-top: 1px dashed #334155;
-  margin-top: 6px;
-  padding: 10px;
-  display: none;
+.locked-sem-banner {
+  padding: 16px;
+  text-align: center;
+  border: 1px dashed var(--text-red);
+  background: rgba(239, 68, 68, 0.05);
+  color: var(--text-red);
   font-size: 11px;
+  margin-bottom: 12px;
 }
 
+/* Guild VASAVI */
 .guild-list {
   display: flex;
   flex-direction: column;
@@ -252,7 +318,6 @@ body {
   padding: 10px;
   border: 1px solid var(--panel-border);
   background: rgba(15, 23, 42, 0.4);
-  position: relative;
 }
 
 .guild-head-anim {
@@ -261,13 +326,19 @@ body {
   animation: pulse-gold 2s infinite;
 }
 
-.guild-head-tag {
-  position: absolute;
-  right: 90px;
-  font-size: 9px;
+.guild-head-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(251, 191, 36, 0.15);
+  border: 1px solid var(--text-gold);
   color: var(--text-gold);
+  font-size: 9px;
   font-weight: bold;
-  text-shadow: 0 0 6px rgba(251, 191, 36, 0.7);
+  padding: 2px 6px;
+  border-radius: 2px;
+  text-shadow: 0 0 6px rgba(251, 191, 36, 0.6);
+  letter-spacing: 0.5px;
 }
 
 @keyframes pulse-gold {
@@ -276,6 +347,7 @@ body {
   100% { box-shadow: 0 0 0px 0px rgba(251, 191, 36, 0.4); }
 }
 
+/* Comms Terminal */
 .comms-container {
   display: grid;
   grid-template-columns: 200px 1fr;
@@ -342,9 +414,60 @@ body {
   font-size: 11px;
 }
 
+/* Camera HUD Reticle */
+.camera-container {
+  position: relative;
+  width: 100%;
+  max-width: 300px;
+  height: 200px;
+  margin: 10px auto;
+  border: 1px solid var(--text-cyan);
+  background: #020617;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.camera-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.reticle-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  border: 2px dashed rgba(56, 189, 248, 0.4);
+  pointer-events: none;
+}
+
+.reticle-scanline {
+  position: absolute;
+  top: 0; left: 0; width: 100%; height: 2px;
+  background: var(--text-cyan);
+  box-shadow: 0 0 8px var(--text-cyan);
+  animation: scan-vertical 2s infinite linear;
+}
+
+@keyframes scan-vertical {
+  0% { top: 0%; opacity: 0.8; }
+  50% { top: 98%; opacity: 0.8; }
+  100% { top: 0%; opacity: 0.8; }
+}
+
+.bio-status-badge {
+  font-size: 10px;
+  text-align: center;
+  color: var(--text-cyan);
+  margin-top: 4px;
+}
+
+/* Modals */
 .modal-backdrop {
   position: fixed;
-  top: 0; left: 0; width: 100vw; height: 100vh;
+  inset: 0;
   background: rgba(0, 0, 0, 0.85);
   display: flex;
   align-items: center;
@@ -372,7 +495,7 @@ body {
   text-transform: uppercase;
 }
 
-.form-group input, .form-group textarea, .form-group select {
+.form-group input, .form-group select {
   width: 100%;
   background: #030712;
   border: 1px solid #334155;
@@ -380,4 +503,88 @@ body {
   padding: 6px 8px;
   font-size: 11px;
   outline: none;
+}
+
+.banner-uncalibrated {
+  background: rgba(251, 191, 36, 0.15);
+  border: 1px dashed var(--text-gold);
+  color: var(--text-gold);
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: bold;
+  text-align: center;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  animation: pulse-gold 2s infinite;
+}
+
+.banner-uncalibrated:hover {
+  background: var(--text-gold);
+  color: #000;
+}
+
+/* Flashy +50 XP Registration Celebration Modal */
+.bonus-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 7, 18, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  backdrop-filter: blur(6px);
+  animation: fadeInModal 0.3s ease;
+}
+
+.bonus-card {
+  width: 440px;
+  background: linear-gradient(180deg, #0f172a 0%, #030712 100%);
+  border: 2px solid var(--text-gold);
+  border-radius: 6px;
+  padding: 28px;
+  text-align: center;
+  position: relative;
+  box-shadow: 0 0 40px rgba(251, 191, 36, 0.3), inset 0 0 20px rgba(251, 191, 36, 0.1);
+  animation: popScale 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.bonus-laser-banner {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--text-cyan);
+  text-transform: uppercase;
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+
+.bonus-xp-glow {
+  font-size: 54px;
+  font-weight: 900;
+  color: var(--text-gold);
+  text-shadow: 0 0 15px rgba(251, 191, 36, 0.8), 0 0 30px rgba(251, 191, 36, 0.4);
+  letter-spacing: 2px;
+  margin: 12px 0;
+  animation: pulseGoldText 1.5s infinite alternate ease-in-out;
+}
+
+.bonus-subtext {
+  font-size: 12px;
+  color: #cbd5e1;
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+@keyframes popScale {
+  0% { transform: scale(0.7); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes fadeInModal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pulseGoldText {
+  0% { transform: scale(1); text-shadow: 0 0 15px rgba(251, 191, 36, 0.8); }
+  100% { transform: scale(1.06); text-shadow: 0 0 25px rgba(251, 191, 36, 1), 0 0 45px rgba(245, 158, 11, 0.7); }
 }
