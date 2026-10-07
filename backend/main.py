@@ -43,7 +43,16 @@ def verify_password(stored_hash: str, provided_password: str) -> bool:
 def init_database():
     conn = get_db()
     c = conn.cursor()
-
+# Ensure legacy NOT NULL columns do not block registration
+    c.execute("PRAGMA table_info(users);")
+    existing_cols = [r[1] for r in c.fetchall()]
+    for legacy_col in ["full_name", "email"]:
+        if legacy_col in existing_cols:
+            try:
+                c.execute(f"ALTER TABLE users DROP COLUMN {legacy_col};")
+                print(f"[DB MIGRATION] Dropped obsolete column '{legacy_col}' from table 'users'.")
+            except Exception as e:
+                print(f"[DB WARNING] Failed to drop '{legacy_col}': {e}")
     # 1. Base Users Table
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
