@@ -462,6 +462,12 @@ async function loadGuildMatrix() {
       const row = document.createElement('div');
       row.className = `guild-row ${isHead ? 'guild-head-anim' : ''}`;
 
+            // Admin Delete Button (Only visible to Creator, cannot delete self)
+      let adminControls = '';
+      if (currentUser && currentUser.role === 'creator' && member.username.toLowerCase() !== 'ganshyam') {
+        adminControls = `<button class="pixel-btn btn-danger" style="padding: 2px 5px; font-size: 9px; margin-left: 6px;" title="Remove Cadet" onclick="removeCadet('${member.username}')">X</button>`;
+      }
+
       row.innerHTML = `
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; max-width: 65%;">
           <strong style="color: ${isHead ? 'var(--text-gold)' : 'inherit'};">${member.username.toUpperCase()}</strong> 
@@ -471,8 +477,10 @@ async function loadGuildMatrix() {
         <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
           <span class="badge" style="border-color: var(--text-cyan); color: var(--text-cyan);">LVL ${String(stats.level).padStart(2, '0')}</span>
           <span class="badge badge-done">${stats.totalXp} XP</span>
+          ${adminControls}
         </div>
       `;
+
       container.appendChild(row);
 
       // Active user level & progress bar sync
