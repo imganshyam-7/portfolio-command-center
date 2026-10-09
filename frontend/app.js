@@ -448,6 +448,11 @@ async function loadGuildMatrix() {
     const res = await fetch('/api/team/progress');
     if (!res.ok) return;
     const team = await res.json();
+    
+    // Update the live registered counter badge
+    const countBadge = document.getElementById('guild-count');
+    if (countBadge) countBadge.innerText = `${team.length} REGISTERED`;
+
     const container = document.getElementById('guild-roster-container');
     container.innerHTML = '';
 
@@ -483,6 +488,7 @@ async function loadGuildMatrix() {
     console.error('Failed to load Guild matrix:', err);
   }
 }
+
 
 // ==========================================
 // Creator Biometric Enrollment Modal
