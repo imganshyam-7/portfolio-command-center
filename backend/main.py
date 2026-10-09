@@ -515,6 +515,39 @@ def submit_quest(payload: QuestSubmitRequest, user: dict = Depends(get_current_u
 # ==============================================================================
 # Guild Matrix & Auxiliary Routes
 # ==============================================================================
+
+@app.delete("/api/users/{target_username}")
+def remove_cadet(target_username: str, user: dict = Depends(get_current_user)):
+    """Permanently deletes a user and wipes their progress (Creator-only)."""
+    if user["role"] != "creator":
+        raise HTTPException(status_code=403, detail="Access Denied: Only Creator can remove personnel.")
+
+    target = target_username.strip().lower()
+    if target == "ganshyam":
+        raise HTTPException(status_code=403, detail="Operation rejected: Cannot delete the Master Creator.")
+
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        # Get target user ID
+        c.execute("SELECT id FROM users WHERE LOWER(username) = ?;", (target,))
+        row = c.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Cadet not found in database.")
+
+        target_id = row["id"]
+
+        # Wipe user quests, messages, and account
+        c.execute("DELETE FROM user_quest_progress WHERE user_id = ?;", (target_id,))
+        c.execute("DELETE FROM private_messages WHERE sender_id = ? OR receiver_id = ?;", (target_id, target_id))
+        c.execute("DELETE FROM users WHERE id = ?;", (target_id,))
+        conn.commit()
+
+        return {"status": "success", "message": f"Cadet [{target.upper()}] has been permanently wiped from the system."}
+    finally:
+        conn.close()
+
+
 @app.get("/api/team/progress")
 def team_progress():
     conn = get_db()
