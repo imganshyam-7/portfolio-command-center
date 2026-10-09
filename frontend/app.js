@@ -641,3 +641,25 @@ async function sendTransmission() {
     console.error('Error sending message:', err);
   }
 }
+
+// ==========================================
+// Admin Controls
+// ==========================================
+async function removeCadet(targetUsername) {
+  const confirmWipe = confirm(`⚠️ WARNING: Are you sure you want to permanently delete cadet [${targetUsername.toUpperCase()}]? This wipes all their XP, quests, and biometrics. This cannot be undone.`);
+  
+  if (!confirmWipe) return;
+
+  try {
+    const res = await apiFetch(`/api/users/${targetUsername}`, { method: 'DELETE' });
+    const data = await parseJsonResponse(res);
+    
+    alert(data.message);
+    
+    // Refresh the UI to show the user is gone
+    await loadGuildMatrix();
+    await loadPeers();
+  } catch (err) {
+    alert(err.message);
+  }
+}
