@@ -3,15 +3,15 @@ import sqlite3
 import hashlib
 import secrets
 import json
-from datetime import date, datetime
-from typing import Optional, List
-from fastapi import FastAPI, Depends, HTTPException, Header, status
+import urllib.request
+import re
+from datetime import date
+from typing import Optional
+from fastapi import FastAPI, Depends, HTTPException, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-
-from backend.biometrics import extract_face_embedding, verify_faces
 
 # ==============================================================================
 # Database Configuration & Self-Healing Auto-Migrations
@@ -43,23 +43,14 @@ def verify_password(stored_hash: str, provided_password: str) -> bool:
 def init_database():
     conn = get_db()
     c = conn.cursor()
-# Ensure legacy NOT NULL columns do not block registration
-    c.execute("PRAGMA table_info(users);")
-    existing_cols = [r[1] for r in c.fetchall()]
-    for legacy_col in ["full_name", "email"]:
-        if legacy_col in existing_cols:
-            try:
-                c.execute(f"ALTER TABLE users DROP COLUMN {legacy_col};")
-                print(f"[DB MIGRATION] Dropped obsolete column '{legacy_col}' from table 'users'.")
-            except Exception as e:
-                print(f"[DB WARNING] Failed to drop '{legacy_col}': {e}")
-    # 1. Base Users Table
+
+    # 1. Base Users Table (Now using github_handle instead of biometrics)
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT,
-            biometric_encoding TEXT,
+            github_handle TEXT,
             role TEXT DEFAULT 'member',
             current_xp INTEGER DEFAULT 0,
             current_semester INTEGER DEFAULT 3,
@@ -67,11 +58,12 @@ def init_database():
         );
     """)
 
-    # Self-healing column patch for users table
     c.execute("PRAGMA table_info(users);")
     user_cols = [r[1] for r in c.fetchall()]
+    
+    # Auto-migrate missing columns
     user_patches = [
-        ("biometric_encoding", "TEXT"),
+        ("github_handle", "TEXT"),
         ("current_xp", "INTEGER DEFAULT 0"),
         ("current_semester", "INTEGER DEFAULT 3"),
         ("role", "TEXT DEFAULT 'member'")
@@ -80,19 +72,26 @@ def init_database():
         if col not in user_cols:
             try:
                 c.execute(f"ALTER TABLE users ADD COLUMN {col} {definition};")
-                print(f"[DB MIGRATION] Added column '{col}' to table 'users'.")
-            except Exception as e:
-                print(f"[DB WARNING] Failed patching '{col}': {e}")
+            except Exception:
+                pass
 
-    # Seed Creator Account if Missing
+    # Drop legacy constraints if they exist
+    for legacy_col in ["full_name", "email", "biometric_encoding"]:
+        if legacy_col in user_cols:
+            try:
+                c.execute(f"ALTER TABLE users DROP COLUMN {legacy_col};")
+            except Exception:
+                pass
+
+    # Seed Master Creator Account
     c.execute("SELECT id FROM users WHERE LOWER(username) = 'ganshyam';")
     if not c.fetchone():
         c.execute("""
-            INSERT INTO users (username, password_hash, role, current_xp, current_semester)
-            VALUES ('ganshyam', ?, 'creator', 0, 3);
+            INSERT INTO users (username, password_hash, role, current_xp, current_semester, github_handle)
+            VALUES ('ganshyam', ?, 'creator', 0, 3, 'ganshyam-7');
         """, (hash_password("ganshyam123"),))
 
-    # 2. Quest Progress Table & Migrations
+    # 2. Quest Progress Table
     c.execute("""
         CREATE TABLE IF NOT EXISTS user_quest_progress (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -112,9 +111,8 @@ def init_database():
         if col not in q_cols:
             try:
                 c.execute(f"ALTER TABLE user_quest_progress ADD COLUMN {col} TEXT;")
-                print(f"[DB MIGRATION] Added column '{col}' to table 'user_quest_progress'.")
-            except Exception as e:
-                print(f"[DB WARNING] Failed patching '{col}': {e}")
+            except Exception:
+                pass
 
     # 3. Private Messaging
     c.execute("""
@@ -139,68 +137,21 @@ def init_database():
             start_date TEXT,
             end_date TEXT,
             xp_reward INTEGER DEFAULT 100,
-            tech_stack TEXT,
-            cadence_type TEXT DEFAULT 'sprint',
-            required_repo_name TEXT DEFAULT 'pending-repo',
-            polish_tag TEXT DEFAULT 'standard',
-            domain TEXT DEFAULT 'ECE'
+            tech_stack TEXT
         );
     """)
 
     c.execute("SELECT COUNT(*) FROM roadmap_milestones;")
     if c.fetchone()[0] == 0:
         curriculum = [
-            # SEMESTER 3
             ("SEM3-M1", "B2B Procurement Scraper", 3, "minor", "2026-10-19", "2026-10-25", 100, 
-             "Architect and deploy an automated B2B procurement scraping engine leveraging Python, Playwright, and BeautifulSoup. The system navigates dynamic wholesale marketplaces (such as IndiaMART or Alibaba), bypassing client-side rendering bottlenecks and rate limits to extract structured product tiers, wholesale lot pricing, and supplier credential verifications. Captured telemetry is normalized, deduplicated, and persistently archived into SQLite with transaction logging, enabling downstream price-trend analysis and automated re-ordering pipelines.",
-             "Python, Playwright, BeautifulSoup, SQLite"),
-            ("SEM3-M2", "OpenCV Face/Body Recog Base", 3, "minor", "2026-10-26", "2026-11-01", 100,
-             "Construct a baseline computer vision surveillance pipeline in C++ and Python utilizing OpenCV with lightweight ONNX neural network backends (YuNet and SFace). The pipeline ingests live video streams from connected webcam hardware, performs real-time face detection with landmark alignment, extracts 128-dimensional biometric embeddings, and executes cosine similarity matching against local facial rosters to prevent proxy check-ins and unauthorized terminal access.",
-             "Python, C++, OpenCV, ONNX"),
-            ("SEM3-M3", "Retail Footfall Counter", 3, "minor", "2026-11-02", "2026-11-08", 100,
-             "Develop an optical retail footfall monitoring engine that tracks pedestrian vector trajectories across predefined directional boundary planes. Utilizing OpenCV background subtraction (MOG2) paired with centroid tracking algorithms in NumPy, the engine filters out environmental noise, tracks individual movement vectors, and logs bidirectional foot traffic metrics into a structured telemetry database for peak-hour retail density analysis.",
-             "OpenCV, NumPy, Python"),
-            ("SEM3-M4", "Digital Signal Filter Sim", 3, "minor", "2026-11-09", "2026-11-15", 100,
-             "Implement a digital signal processing simulation suite in Python leveraging NumPy and SciPy to design, analyze, and test Finite Impulse Response (FIR) and Infinite Impulse Response (IIR) digital filters. The system computes transfer functions, generates pole-zero plots, and analyzes frequency responses using Fast Fourier Transforms (FFT) across synthetic noisy audio feeds, verifying phase linearity and stopband attenuation characteristics.",
-             "Python, SciPy, NumPy, Matplotlib"),
-            ("SEM3-M5", "Local Inventory Sync Script", 3, "minor", "2026-11-16", "2026-11-22", 100,
-             "Engineer an offline-first relational database synchronization daemon for POS registers operating in constrained network environments. Built with Python and SQLite running in Write-Ahead Logging (WAL) mode, the daemon batches local register sales and transaction logs into signed JSON payloads, executes idempotent delta reconciliations against a central master endpoint upon network restoration, and handles distributed conflict resolution seamlessly.",
-             "Python, SQLite, REST APIs"),
+             "Architect and deploy an automated B2B procurement scraping engine leveraging Python, Playwright, and BeautifulSoup. The system navigates dynamic wholesale marketplaces to extract structured product tiers and wholesale lot pricing, archiving into SQLite.", "Python, Playwright, BeautifulSoup, SQLite"),
             ("SEM3-MAJ1", "Smart Retail POS Terminal", 3, "major", "2026-10-11", "2026-11-08", 200,
-             "Design and deliver a production-ready Smart Retail Point-of-Sale (POS) terminal integrating a high-performance FastAPI asynchronous backend with a responsive retro-styled tactical web dashboard. The terminal manages real-time SKU barcode lookups, persistent cart state, atomic inventory decrements, thermal receipt payload generation, and localized sales reporting while maintaining low latency under peak store throughput.",
-             "FastAPI, JavaScript, SQLite, HTML5/CSS3"),
-            ("SEM3-MAJ2", "STM32 Ethernet Bootloader", 3, "major", "2026-10-26", "2026-11-22", 200,
-             "Develop an embedded Ethernet bootloader firmware application for ARM Cortex-M microcontrollers (STM32 series) programmed in bare-metal C. The bootloader interfaces directly with physical Ethernet MAC/PHY controllers, listens for incoming UDP/TFTP flash firmware packets, validates cyclic redundancy checksums (CRC32), and safely reprograms target internal flash memory sectors while supporting automated rollback in the event of transmission failure.",
-             "Embedded C, ARM Cortex-M, STM32, Ethernet"),
-
-            # SEMESTER 4
-            ("SEM4-M1", "I2C Store Climate Sensor", 4, "minor", "2027-01-03", "2027-01-17", 100,
-             "Design a custom Linux kernel I2C bus driver and telemetry daemon for industrial ambient sensors monitoring store room climate. The software establishes reliable communication over I2C register maps, samples temperature and relative humidity at deterministic intervals, implements rolling hardware averaging to filter transient spikes, and exposes data through standardized sysfs endpoints.",
-             "C, Linux Kernel Drivers, I2C"),
-            ("SEM4-M2", "Stepper Motor Conveyor Ctrl", 4, "minor", "2027-01-18", "2027-01-31", 100,
-             "Program a deterministic FreeRTOS stepper motor controller running on an STM32 microcontroller to drive warehouse conveyor sorting belts. The firmware executes trapezoidal acceleration/deceleration speed profiles, synchronizes step timing via hardware timers with sub-millisecond jitter, and integrates optical home limit switches with emergency-stop hardware interrupts.",
-             "C++, FreeRTOS, STM32, Timers"),
-            ("SEM4-M3", "Edge AI Surveillance Node", 4, "minor", "2027-02-01", "2027-02-14", 100,
-             "Deploy an edge-accelerated surveillance inference node utilizing Google Coral EdgeTPU silicon integrated with Python and OpenCV. The node ingests RTSP surveillance feeds, executes quantized MobileNet SSD object detection pipelines locally without sending video streams to the cloud, and broadcasts localized bounding box coordinates over encrypted MQTT message brokers.",
-             "Python, EdgeTPU, OpenCV, MQTT"),
+             "Design and deliver a production-ready Smart Retail Point-of-Sale (POS) terminal integrating a high-performance FastAPI asynchronous backend with a responsive retro-styled tactical web dashboard. The terminal manages real-time SKU barcode lookups and cart state.", "FastAPI, JavaScript, SQLite"),
             ("SEM4-M4", "Verilog ALU Design", 4, "minor", "2027-02-15", "2027-02-21", 100,
-             "Implement an Arithmetic Logic Unit (ALU) modeled in synthesizable IEEE 1364 Verilog RTL. The module performs multi-bit integer arithmetic, boolean logic, bitwise shifting, and condition code flag generation, supported by a self-checking testbench run through ModelSim/Icarus Verilog.",
-             "Verilog RTL, Icarus Verilog, GTKWave"),
-            ("SEM4-M5", "Passive AM/FM Receiver PCB", 4, "minor", "2027-03-01", "2027-03-14", 100,
-             "Design, simulate, and lay out an analog AM/FM radio receiver PCB in KiCad. The board features resonant LC tank circuits, high-frequency envelope detection diodes, low-noise audio amplification stages, and controlled microstrip trace impedance for RF signal paths.",
-             "KiCad, Analog RF, SPICE Simulation"),
-            ("SEM4-M6", "ARM GPIO Store LED Matrix", 4, "minor", "2027-03-15", "2027-03-28", 100,
-             "Develop bare-metal C display driver firmware for a high-density LED matrix panel powered by ARM Cortex-M microcontrollers. The firmware utilizes Direct Memory Access (DMA) channels to stream framebuffer contents with zero CPU overhead, achieving tear-free visual refreshes.",
-             "C, ARM Cortex-M, DMA, GPIO"),
+             "Implement an Arithmetic Logic Unit (ALU) modeled in synthesizable IEEE 1364 Verilog RTL. The module performs multi-bit integer arithmetic, boolean logic, and condition code flag generation, supported by a self-checking testbench.", "Verilog RTL, Icarus Verilog"),
             ("SEM4-MAJ1", "FPGA Hardware Smart Scale", 4, "major", "2027-01-10", "2027-02-14", 200,
-             "Implement an FPGA-accelerated digital smart weighing scale designed in synthesizable Verilog RTL on Xilinx Artix-7 silicon. The hardware core interfaces with dual 24-bit delta-sigma ADCs via SPI, applies real-time finite impulse response filtering in hardware DSP slices, and computes weight taring and pricing arithmetic in single-cycle pipelines before driving an onboard display.",
-             "Verilog RTL, FPGA, SPI, DSP Slices"),
-            ("SEM4-MAJ2", "IoT Warehouse Grid System", 4, "major", "2027-03-01", "2027-04-04", 200,
-             "Construct an IoT warehouse inventory mesh network utilizing low-power LoRa transceivers paired with C++ firmware. The system coordinates time-slotted channel hopping (TSCH) across localized warehouse grid zones, implements packet acknowledgments with payload encryption, and forwards asset proximity beacons to a central gateway.",
-             "C++, LoRaWAN, Mesh Networking"),
-            ("SEM4-MAJ3", "Automated Checkout Gate", 4, "major", "2027-03-22", "2027-04-18", 200,
-             "Build a closed-loop automated optical entry/exit barrier control mechanism. Utilizing rotary optical encoders and DC motor PWM drivers, the controller applies PID closed-loop feedback routines to open and close security gates in response to valid POS transaction webhooks.",
-             "C++, PID Control, PWM, Hardware Drivers")
+             "Implement an FPGA-accelerated digital smart weighing scale designed in synthesizable Verilog RTL on Xilinx Artix-7 silicon. The hardware core interfaces with dual 24-bit delta-sigma ADCs via SPI and computes weight taring logic.", "Verilog RTL, FPGA, SPI, DSP Slices")
         ]
         c.executemany("""
             INSERT INTO roadmap_milestones (code, title, semester, tier, start_date, end_date, xp_reward, description, tech_stack)
@@ -215,7 +166,7 @@ init_database()
 # ==============================================================================
 # FastAPI Application
 # ==============================================================================
-app = FastAPI(title="ECE Portfolio Command Center", version="3.1")
+app = FastAPI(title="ECE Portfolio Command Center", version="4.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -235,16 +186,12 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     username: str
     password: str
+    github_handle: str
     current_semester: Optional[int] = 3
-    biometric_image: str
-
-class CalibrateRequest(BaseModel):
-    biometric_image: str
 
 class QuestSubmitRequest(BaseModel):
     quest_id: int
     submission_url: str
-    biometric_snapshot: str
 
 class MessageSendRequest(BaseModel):
     receiver_id: int
@@ -282,7 +229,7 @@ def get_optional_user(authorization: Optional[str] = Header(None)) -> Optional[d
         conn.close()
 
 # ==============================================================================
-# Auth & Biometrics Routes
+# Auth Routes
 # ==============================================================================
 @app.post("/api/auth/login")
 def auth_login(payload: LoginRequest):
@@ -292,15 +239,11 @@ def auth_login(payload: LoginRequest):
     try:
         c.execute("SELECT * FROM users WHERE LOWER(username) = ?;", (username,))
         user = c.fetchone()
-        if not user:
+        if not user or not verify_password(user["password_hash"], payload.password):
             raise HTTPException(status_code=401, detail="Invalid callsign or passphrase.")
 
         user_dict = dict(user)
-        if not verify_password(user_dict.get("password_hash"), payload.password):
-            raise HTTPException(status_code=401, detail="Invalid callsign or passphrase.")
-
         user_dict.pop("password_hash", None)
-        user_dict["has_biometrics"] = bool(user_dict.get("biometric_encoding"))
         return {"status": "success", "user": user_dict}
     finally:
         conn.close()
@@ -309,19 +252,14 @@ def auth_login(payload: LoginRequest):
 def auth_register(payload: RegisterRequest):
     username = payload.username.strip().lower()
     password = payload.password.strip()
+    github = payload.github_handle.strip()
 
-    if not username:
-        raise HTTPException(status_code=400, detail="Callsign cannot be empty.")
+    if not username or not github:
+        raise HTTPException(status_code=400, detail="Callsign and GitHub Handle are required.")
     if len(password) < 4:
         raise HTTPException(status_code=400, detail="Passphrase must be at least 4 characters.")
     if username == "ganshyam":
         raise HTTPException(status_code=403, detail="The master creator callsign is restricted. Please login.")
-
-    try:
-        embedding = extract_face_embedding(payload.biometric_image)
-        embedding_json = json.dumps(embedding)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Biometric Calibration Error: {str(e)}")
 
     conn = get_db()
     c = conn.cursor()
@@ -331,11 +269,11 @@ def auth_register(payload: RegisterRequest):
             raise HTTPException(status_code=400, detail="Callsign already taken.")
 
         pw_hash = hash_password(password)
-        # Grants 50 XP starting welcome bonus to all registered cadets
+        # Grants 50 XP starting welcome bonus
         c.execute("""
-            INSERT INTO users (username, password_hash, biometric_encoding, role, current_xp, current_semester)
+            INSERT INTO users (username, password_hash, github_handle, role, current_xp, current_semester)
             VALUES (?, ?, ?, 'member', 50, ?);
-        """, (username, pw_hash, embedding_json, payload.current_semester or 3))
+        """, (username, pw_hash, github, payload.current_semester or 3))
         conn.commit()
 
         c.execute("SELECT id, username, role, current_xp, current_semester FROM users WHERE LOWER(username) = ?;", (username,))
@@ -343,29 +281,8 @@ def auth_register(payload: RegisterRequest):
     finally:
         conn.close()
 
-@app.post("/api/bio/calibrate")
-def calibrate_biometrics(payload: CalibrateRequest, user: dict = Depends(get_current_user)):
-    """Enrolls or recalibrates biometric face embedding (Creator-only privilege)."""
-    if user["role"] != "creator":
-        raise HTTPException(status_code=403, detail="Access Denied: Only Creator can recalibrate biometrics.")
-
-    try:
-        embedding = extract_face_embedding(payload.biometric_image)
-        embedding_json = json.dumps(embedding)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Facial Optical Scan Failed: {str(e)}")
-
-    conn = get_db()
-    c = conn.cursor()
-    try:
-        c.execute("UPDATE users SET biometric_encoding = ? WHERE id = ?;", (embedding_json, user["id"]))
-        conn.commit()
-        return {"status": "success", "message": f"Biometric master face enrolled for [{user['username'].upper()}]."}
-    finally:
-        conn.close()
-
 # ==============================================================================
-# Quests & Anti-Proxy Submission
+# Quests & Git-Signature Anti-Proxy Submission
 # ==============================================================================
 @app.get("/api/quests")
 def get_quests(semester: Optional[int] = None, user: Optional[dict] = Depends(get_optional_user)):
@@ -374,9 +291,8 @@ def get_quests(semester: Optional[int] = None, user: Optional[dict] = Depends(ge
     try:
         target_sem = semester if semester is not None else 3
         user_id = user["id"] if user else 0
-
-        # Inter-semester progression lock: semester > 3 requires all prior semester quests completed
         semester_locked = False
+
         if target_sem > 3:
             if user_id > 0:
                 c.execute("""
@@ -384,8 +300,7 @@ def get_quests(semester: Optional[int] = None, user: Optional[dict] = Depends(ge
                     LEFT JOIN user_quest_progress p ON m.id = p.quest_id AND p.user_id = ?
                     WHERE m.semester = ? AND (p.status IS NULL OR (p.status != 'SUBMITTED' AND p.status != 'COMPLETED'));
                 """, (user_id, target_sem - 1))
-                incomplete = c.fetchone()[0]
-                if incomplete > 0:
+                if c.fetchone()[0] > 0:
                     semester_locked = True
             else:
                 semester_locked = True
@@ -429,7 +344,6 @@ def get_quests(semester: Optional[int] = None, user: Optional[dict] = Depends(ge
                     previous_completed = False
                     if active_quest is None:
                         active_quest = q
-
             quests.append(q)
 
         return {
@@ -444,37 +358,47 @@ def get_quests(semester: Optional[int] = None, user: Optional[dict] = Depends(ge
 @app.post("/api/quests/submit")
 def submit_quest(payload: QuestSubmitRequest, user: dict = Depends(get_current_user)):
     url = payload.submission_url.strip()
-    if not url:
-        raise HTTPException(status_code=400, detail="Repository link cannot be empty.")
     if not url.startswith("http://") and not url.startswith("https://"):
         url = "https://" + url
 
-    # Anti-Proxy Verification
-    enrolled_encoding_str = user.get("biometric_encoding")
-    if not enrolled_encoding_str:
-        if user["role"] == "creator":
-            raise HTTPException(
-                status_code=400, 
-                detail="Master Face Uncalibrated! Click '⚡ ENROLL CREATOR BIOMETRICS' in the top status bar first."
-            )
-        else:
-            raise HTTPException(
-                status_code=400, 
-                detail="Biometric profile not enrolled. Contact Creator to initialize your node."
-            )
+    # 1. Anti-Proxy Verification: Check GitHub Identity & Cryptographic Signature
+    match = re.search(r"github\.com/([^/]+)/([^/]+)", url)
+    if not match:
+        raise HTTPException(status_code=400, detail="Must be a valid GitHub repository URL.")
+    
+    owner, repo = match.groups()
+    repo = repo.removesuffix(".git")
 
-    try:
-        enrolled_embedding = json.loads(enrolled_encoding_str)
-        is_match = verify_faces(enrolled_embedding, payload.biometric_snapshot)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Optical Biometric Error: {str(e)}")
-
-    if not is_match:
+    if not user.get("github_handle") or owner.lower() != user["github_handle"].lower():
         raise HTTPException(
             status_code=403, 
-            detail="⛔ BIOMETRIC REJECTED: Verification failed. The live operator does not match the registered face for this account!"
+            detail=f"Anti-Proxy Lock: Repository owner '{owner}' does not match your registered GitHub handle '{user.get('github_handle')}'. You can only submit your own work."
         )
 
+    api_url = f"https://api.github.com/repos/{owner}/{repo}/commits"
+    req = urllib.request.Request(api_url, headers={'User-Agent': 'ECE-Command-Center'})
+    
+    try:
+        with urllib.request.urlopen(req) as response:
+            commits = json.loads(response.read().decode())
+            if not commits:
+                raise HTTPException(status_code=400, detail="Repository is empty. Commit your work first.")
+            
+            latest_commit = commits[0]
+            verification = latest_commit.get("commit", {}).get("verification", {})
+            
+            if not verification.get("verified"):
+                reason = verification.get("reason", "Unknown")
+                raise HTTPException(
+                    status_code=403, 
+                    detail=f"⛔ REJECTED: Your latest commit is not cryptographically signed. GitHub says: {reason}. Check your local SSH/GPG keys."
+                )
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=400, detail="Failed to verify repository with GitHub API. Ensure the repository is public.")
+
+    # 2. Grant XP and Record Progress
     conn = get_db()
     c = conn.cursor()
     try:
@@ -483,7 +407,6 @@ def submit_quest(payload: QuestSubmitRequest, user: dict = Depends(get_current_u
         if not quest:
             raise HTTPException(status_code=404, detail="Milestone directive not found.")
 
-        # Check existing submission to prevent duplicate XP inflation
         c.execute("SELECT status FROM user_quest_progress WHERE user_id = ? AND quest_id = ?;", (user["id"], payload.quest_id))
         existing = c.fetchone()
         already_completed = existing and existing["status"] in ("SUBMITTED", "COMPLETED")
@@ -505,7 +428,7 @@ def submit_quest(payload: QuestSubmitRequest, user: dict = Depends(get_current_u
 
         conn.commit()
 
-        msg = f"Biometrics verified! Directive '{quest['title']}' submitted."
+        msg = f"Cryptographic signature verified! Directive '{quest['title']}' submitted."
         if not already_completed:
             msg += f" (+{xp_to_award} XP allocated)"
         return {"status": "success", "message": msg}
@@ -515,6 +438,28 @@ def submit_quest(payload: QuestSubmitRequest, user: dict = Depends(get_current_u
 # ==============================================================================
 # Guild Matrix & Auxiliary Routes
 # ==============================================================================
+@app.get("/api/team/progress")
+def team_progress():
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        c.execute("SELECT id, username, role, current_xp AS xp FROM users ORDER BY current_xp DESC, id ASC;")
+        team = [dict(r) for r in c.fetchall()]
+        if team:
+            team[0]["is_guild_head"] = True
+        return team
+    finally:
+        conn.close()
+
+@app.get("/api/users")
+def get_users(user: dict = Depends(get_current_user)):
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        c.execute("SELECT id, username, role, current_xp FROM users ORDER BY id ASC;")
+        return [dict(r) for r in c.fetchall()]
+    finally:
+        conn.close()
 
 @app.delete("/api/users/{target_username}")
 def remove_cadet(target_username: str, user: dict = Depends(get_current_user)):
@@ -529,35 +474,18 @@ def remove_cadet(target_username: str, user: dict = Depends(get_current_user)):
     conn = get_db()
     c = conn.cursor()
     try:
-        # Get target user ID
         c.execute("SELECT id FROM users WHERE LOWER(username) = ?;", (target,))
         row = c.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Cadet not found in database.")
 
         target_id = row["id"]
-
-        # Wipe user quests, messages, and account
         c.execute("DELETE FROM user_quest_progress WHERE user_id = ?;", (target_id,))
         c.execute("DELETE FROM private_messages WHERE sender_id = ? OR receiver_id = ?;", (target_id, target_id))
         c.execute("DELETE FROM users WHERE id = ?;", (target_id,))
         conn.commit()
 
         return {"status": "success", "message": f"Cadet [{target.upper()}] has been permanently wiped from the system."}
-    finally:
-        conn.close()
-
-
-@app.get("/api/team/progress")
-def team_progress():
-    conn = get_db()
-    c = conn.cursor()
-    try:
-        c.execute("SELECT id, username, role, current_xp AS xp FROM users ORDER BY current_xp DESC, id ASC;")
-        team = [dict(r) for r in c.fetchall()]
-        if team:
-            team[0]["is_guild_head"] = True
-        return team
     finally:
         conn.close()
 
@@ -592,16 +520,6 @@ def get_alerts(user: dict = Depends(get_current_user)):
             for r in c.fetchall():
                 alerts.append(f"OVERDUE: You missed the deadline for {r['title']} ({r['end_date']})")
         return {"alerts": alerts}
-    finally:
-        conn.close()
-
-@app.get("/api/users")
-def get_users(user: dict = Depends(get_current_user)):
-    conn = get_db()
-    c = conn.cursor()
-    try:
-        c.execute("SELECT id, username, role, current_xp, (biometric_encoding IS NOT NULL) AS has_bio FROM users ORDER BY id ASC;")
-        return [dict(r) for r in c.fetchall()]
     finally:
         conn.close()
 
