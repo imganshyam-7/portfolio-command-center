@@ -5,52 +5,8 @@ let currentSpotlightQuest = null;
 let activeQuestsCatalog = [];
 let pendingWelcomeUser = null;
 
-let activeStreams = {};
-
-async function startCamera(videoElementId) {
-  try {
-    if (activeStreams[videoElementId]) {
-      stopCamera(videoElementId);
-    }
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: 320, height: 240, facingMode: 'user' }
-    });
-    const videoEl = document.getElementById(videoElementId);
-    if (videoEl) {
-      videoEl.srcObject = stream;
-      activeStreams[videoElementId] = stream;
-      await videoEl.play().catch(() => {});
-    }
-  } catch (err) {
-    console.error("Camera access error:", err);
-    alert("Camera permission denied. Facial verification requires active webcam access.");
-  }
-}
-
-function stopCamera(videoElementId) {
-  if (activeStreams[videoElementId]) {
-    activeStreams[videoElementId].getTracks().forEach(track => track.stop());
-    delete activeStreams[videoElementId];
-  }
-  const videoEl = document.getElementById(videoElementId);
-  if (videoEl) videoEl.srcObject = null;
-}
-
-function captureFrame(videoElementId) {
-  const video = document.getElementById(videoElementId);
-  if (!video || !video.videoWidth || video.videoWidth === 0) {
-    throw new Error("Camera feed initializing. Please wait a moment and face the sensor directly.");
-  }
-  const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL('image/jpeg', 0.85);
-}
-
 // ==========================================
-// Safe API Fetch Helper (Prevents "Unexpected token 'I'")
+// Safe API Fetch Helper
 // ==========================================
 async function apiFetch(endpoint, options = {}) {
   const token = localStorage.getItem('auth_token') || '';
@@ -91,7 +47,6 @@ function escapeHtml(str) {
 
 // ==========================================
 // Dynamic RPG Level Scaling
-// Level L -> L+1 requires (L * 100) XP
 // ==========================================
 function getRpgStats(totalXp) {
   let xp = Math.max(0, parseInt(totalXp, 10) || 0);
@@ -103,14 +58,7 @@ function getRpgStats(totalXp) {
     if (xp < accumulated + requiredForCurrentLevel) {
       const xpInLevel = xp - accumulated;
       const progressPercent = Math.min(100, Math.max(0, Math.round((xpInLevel / requiredForCurrentLevel) * 100)));
-      return {
-        level,
-        totalXp: xp,
-        xpInLevel,
-        requiredForCurrentLevel,
-        progressPercent,
-        xpRemaining: requiredForCurrentLevel - xpInLevel
-      };
+      return { level, totalXp: xp, xpInLevel, requiredForCurrentLevel, progressPercent, xpRemaining: requiredForCurrentLevel - xpInLevel };
     }
     accumulated += requiredForCurrentLevel;
     level++;
@@ -140,34 +88,12 @@ async function initSession(username) {
   document.getElementById('auth-status-label').innerText = `ACTIVE: ${username.toUpperCase()} [${currentUser.role.toUpperCase()}]`;
   document.getElementById('profile-name-role').innerText = `${username.toUpperCase()} [${currentUser.role.toUpperCase()}]`;
 
-  const calBtn = document.getElementById('creator-calibrate-btn');
-  if (calBtn) calBtn.style.display = isCreator ? 'inline-block' : 'none';
-
-  await checkBiometricStatus();
-
   await Promise.all([
     loadQuests(),
     loadGuildMatrix(),
     loadPeers(),
     checkDeadlines()
   ]);
-}
-
-async function checkBiometricStatus() {
-  if (!currentUser || currentUser.role !== 'creator') return;
-  try {
-    const res = await apiFetch('/api/users');
-    if (!res.ok) return;
-    const users = await res.json();
-    const me = users.find(u => u.username.toLowerCase() === currentUser.username.toLowerCase());
-    
-    const banner = document.getElementById('bio-warning-banner');
-    if (me && !me.has_bio) {
-      banner.style.display = 'block';
-    } else {
-      banner.style.display = 'none';
-    }
-  } catch (err) {}
 }
 
 function logout() {
@@ -182,7 +108,6 @@ function switchAuthTab(tab) {
   const regBtn = document.getElementById('tab-register-btn');
 
   if (tab === 'login') {
-    stopCamera('reg-camera');
     loginView.style.display = 'block';
     regView.style.display = 'none';
     loginBtn.className = 'pixel-btn';
@@ -192,7 +117,6 @@ function switchAuthTab(tab) {
     regView.style.display = 'block';
     regBtn.className = 'pixel-btn';
     loginBtn.className = 'pixel-btn sem-tab';
-    startCamera('reg-camera');
   }
 }
 
@@ -212,10 +136,6 @@ async function submitLogin() {
     localStorage.setItem('auth_token', data.user.username);
     document.getElementById('auth-modal').style.display = 'none';
     await initSession(data.user.username);
-
-    if (!data.user.has_biometrics && data.user.role === 'creator') {
-      openCalibrationModal();
-    }
   } catch (err) {
     alert(err.message);
   }
@@ -224,26 +144,19 @@ async function submitLogin() {
 async function submitRegister() {
   const username = document.getElementById('reg-username').value.trim();
   const password = document.getElementById('reg-password').value;
+  const github_handle = document.getElementById('reg-github').value.trim();
 
-  if (!username) return alert('Enter a callsign.');
+  if (!username || !github_handle) return alert('Enter a callsign and your GitHub handle.');
   if (password.length < 4) return alert('Passphrase must be at least 4 characters.');
-
-  let faceImage = "";
-  try {
-    faceImage = captureFrame('reg-camera');
-  } catch (err) {
-    return alert(err.message);
-  }
 
   try {
     const res = await fetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, biometric_image: faceImage })
+      body: JSON.stringify({ username, password, github_handle })
     });
     const data = await parseJsonResponse(res);
 
-    stopCamera('reg-camera');
     document.getElementById('auth-modal').style.display = 'none';
     showRegistrationCelebration(data.user.username);
   } catch (err) {
@@ -292,7 +205,6 @@ async function loadQuests() {
 
     document.getElementById('locked-sem-msg').style.display = isLocked ? 'block' : 'none';
 
-    // Spotlight Box
     const spotlightBox = document.getElementById('active-directive-box');
     if (!isLocked && currentSpotlightQuest) {
       spotlightBox.style.display = 'block';
@@ -359,13 +271,7 @@ Tech Stack / Tools: ${q.tech_stack || 'Standard Embedded/Software Stack'}
 Milestone Directive:
 ${q.description}
 
-Deadline Window: ${q.start_date || 'N/A'} through ${q.end_date || 'N/A'}
-
-Provide a comprehensive, high-tier technical breakdown:
-1. Architectural design decisions, protocols, and interface diagrams.
-2. Step-by-step implementation roadmap with core algorithms and starter code.
-3. Common bugs, edge-cases, and timing pitfalls.
-4. Concrete test verification procedures to guarantee production stability.`;
+Provide a comprehensive, high-tier technical breakdown including architectural design decisions, step-by-step implementation roadmap, and testing procedures.`;
 
   navigator.clipboard.writeText(masterPrompt).then(() => {
     alert("🤖 AI Master Prompt copied to clipboard!");
@@ -389,14 +295,11 @@ function openQuestModalById(id) {
   document.getElementById('submit-modal-title').innerText = `SUBMIT: ${title}`;
   document.getElementById('submit-repo-url').value = '';
   document.getElementById('submit-confirm-btn').disabled = false;
-  document.getElementById('submit-confirm-btn').innerText = 'AUTHENTICATE & VERIFY';
+  document.getElementById('submit-confirm-btn').innerText = 'VERIFY SIGNATURE';
   document.getElementById('submit-modal').style.display = 'flex';
-  
-  startCamera('submit-camera');
 }
 
 function closeSubmitModal() {
-  stopCamera('submit-camera');
   document.getElementById('submit-modal').style.display = 'none';
 }
 
@@ -405,26 +308,15 @@ async function submitQuestForm() {
   const repoUrl = document.getElementById('submit-repo-url').value.trim();
   const btn = document.getElementById('submit-confirm-btn');
 
-  if (!repoUrl) return alert('Enter a valid repository or artifact URL.');
-
-  let snapshot = "";
-  try {
-    snapshot = captureFrame('submit-camera');
-  } catch (err) {
-    return alert(err.message);
-  }
+  if (!repoUrl) return alert('Enter a valid repository link.');
 
   btn.disabled = true;
-  btn.innerText = 'SCANNING & VERIFYING...';
+  btn.innerText = 'CHECKING GITHUB API...';
 
   try {
     const res = await apiFetch('/api/quests/submit', {
       method: 'POST',
-      body: JSON.stringify({
-        quest_id: questId,
-        submission_url: repoUrl,
-        biometric_snapshot: snapshot
-      })
+      body: JSON.stringify({ quest_id: questId, submission_url: repoUrl })
     });
     const result = await parseJsonResponse(res);
 
@@ -436,12 +328,12 @@ async function submitQuestForm() {
     alert(err.message);
   } finally {
     btn.disabled = false;
-    btn.innerText = 'AUTHENTICATE & VERIFY';
+    btn.innerText = 'VERIFY SIGNATURE';
   }
 }
 
 // ==========================================
-// Guild Matrix & RPG Level Sync
+// Guild Matrix, Admin & RPG Level Sync
 // ==========================================
 async function loadGuildMatrix() {
   try {
@@ -449,7 +341,6 @@ async function loadGuildMatrix() {
     if (!res.ok) return;
     const team = await res.json();
     
-    // Update the live registered counter badge
     const countBadge = document.getElementById('guild-count');
     if (countBadge) countBadge.innerText = `${team.length} REGISTERED`;
 
@@ -462,7 +353,7 @@ async function loadGuildMatrix() {
       const row = document.createElement('div');
       row.className = `guild-row ${isHead ? 'guild-head-anim' : ''}`;
 
-            // Admin Delete Button (Only visible to Creator, cannot delete self)
+      // Admin Delete Button (Only visible to Creator, cannot delete self)
       let adminControls = '';
       if (currentUser && currentUser.role === 'creator' && member.username.toLowerCase() !== 'ganshyam') {
         adminControls = `<button class="pixel-btn btn-danger" style="padding: 2px 5px; font-size: 9px; margin-left: 6px;" title="Remove Cadet" onclick="removeCadet('${member.username}')">X</button>`;
@@ -480,7 +371,6 @@ async function loadGuildMatrix() {
           ${adminControls}
         </div>
       `;
-
       container.appendChild(row);
 
       // Active user level & progress bar sync
@@ -497,49 +387,18 @@ async function loadGuildMatrix() {
   }
 }
 
-
-// ==========================================
-// Creator Biometric Enrollment Modal
-// ==========================================
-function openCalibrationModal() {
-  document.getElementById('calibration-modal').style.display = 'flex';
-  document.getElementById('cal-save-btn').disabled = false;
-  document.getElementById('cal-save-btn').innerText = 'ENROLL MASTER FACE';
-  startCamera('calibration-camera');
-}
-
-function closeCalibrationModal() {
-  stopCamera('calibration-camera');
-  document.getElementById('calibration-modal').style.display = 'none';
-}
-
-async function executeCalibration() {
-  const btn = document.getElementById('cal-save-btn');
-  let faceImage = "";
-  try {
-    faceImage = captureFrame('calibration-camera');
-  } catch (err) {
-    return alert(err.message);
-  }
-
-  btn.disabled = true;
-  btn.innerText = 'EXTRACTING 128-D EMBEDDINGS...';
+async function removeCadet(targetUsername) {
+  const confirmWipe = confirm(`⚠️ WARNING: Are you sure you want to permanently delete cadet [${targetUsername.toUpperCase()}]? This wipes all their XP and quests. This cannot be undone.`);
+  if (!confirmWipe) return;
 
   try {
-    const res = await apiFetch('/api/bio/calibrate', {
-      method: 'POST',
-      body: JSON.stringify({ biometric_image: faceImage })
-    });
+    const res = await apiFetch(`/api/users/${targetUsername}`, { method: 'DELETE' });
     const data = await parseJsonResponse(res);
-
     alert(data.message);
-    document.getElementById('bio-warning-banner').style.display = 'none';
-    closeCalibrationModal();
+    await loadGuildMatrix();
+    await loadPeers();
   } catch (err) {
     alert(err.message);
-  } finally {
-    btn.disabled = false;
-    btn.innerText = 'ENROLL MASTER FACE';
   }
 }
 
@@ -639,27 +498,5 @@ async function sendTransmission() {
     }
   } catch (err) {
     console.error('Error sending message:', err);
-  }
-}
-
-// ==========================================
-// Admin Controls
-// ==========================================
-async function removeCadet(targetUsername) {
-  const confirmWipe = confirm(`⚠️ WARNING: Are you sure you want to permanently delete cadet [${targetUsername.toUpperCase()}]? This wipes all their XP, quests, and biometrics. This cannot be undone.`);
-  
-  if (!confirmWipe) return;
-
-  try {
-    const res = await apiFetch(`/api/users/${targetUsername}`, { method: 'DELETE' });
-    const data = await parseJsonResponse(res);
-    
-    alert(data.message);
-    
-    // Refresh the UI to show the user is gone
-    await loadGuildMatrix();
-    await loadPeers();
-  } catch (err) {
-    alert(err.message);
   }
 }
